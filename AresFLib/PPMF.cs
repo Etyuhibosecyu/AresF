@@ -85,17 +85,15 @@ file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Res
 			Input.GetSlice(Max(startPos, i - maxContextDepth)..i).ForEach((x, index) => context.SetOrAdd(index, x[0].Lower));
 			context.Reverse();
 			reservedContext.Replace(context);
-			if (i < lzBlockEnd)
-				goto l1;
 			intervalsForBuffer.Clear();
-			if (context.Length == maxContextDepth && i >= (maxContextDepth << 1) + startPos && ProcessLZ(context, i) && i < lzBlockEnd)
-				goto l1;
-			freqTable.Clear();
-			excludingfreqTable.Clear();
-			Escape(item, out var sum, out var frequency);
-			ProcessFrequency(item, ref sum, ref frequency);
-			ProcessBuffers(i);
-		l1:
+			if (i >= lzBlockEnd && (context.Length != maxContextDepth || i < (maxContextDepth << 1) + startPos || !ProcessLZ(context, i) || i >= lzBlockEnd))
+			{
+				freqTable.Clear();
+				excludingfreqTable.Clear();
+				Escape(item, out var sum, out var frequency);
+				ProcessFrequency(item, ref sum, ref frequency);
+				ProcessBuffers(i);
+			}
 			var contextLength = reservedContext.Length;
 			Increase(reservedContext, context, item, out var hlIndex);
 			if (contextLength == maxContextDepth)
