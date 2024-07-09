@@ -4,7 +4,7 @@ namespace AresFLib;
 internal record class PPM(int TN) : IDisposable
 {
 	private ArithmeticEncoder ar = default!;
-	private readonly List<List<Interval>> result = [];
+	private readonly List<NList<Interval>> result = [];
 	private int doubleListsCompleted = 0;
 	private readonly object lockObj = new();
 
@@ -19,7 +19,7 @@ internal record class PPM(int TN) : IDisposable
 		if (input.Length < 4)
 			throw new EncoderFallbackException();
 		ar = new();
-		result.Replace(new List<List<Interval>>(new List<Interval>()));
+		result.Replace(new List<NList<Interval>>(new NList<Interval>()));
 		if (!new PPMInternal(input, result[0], 1, true, TN).Encode())
 			throw new EncoderFallbackException();
 		result[0].ForEach(x => ar.WritePart(x.Lower, x.Length, x.Base));
@@ -35,7 +35,7 @@ internal record class PPM(int TN) : IDisposable
 		Current[TN] = 0;
 		CurrentMaximum[TN] = ProgressBarStep * (length - 1);
 		ar = new();
-		result.Replace(RedStarLinq.FillArray(length, _ => new List<Interval>()));
+		result.Replace(RedStarLinq.FillArray(length, _ => new NList<Interval>()));
 		Parallel.For(0, length, i =>
 		{
 			if (!new PPMInternal(input[i], result[i], split ? 1 : i, i == WordsListActualParts - 1 || split, TN).Encode())
@@ -54,13 +54,13 @@ internal record class PPM(int TN) : IDisposable
 	}
 }
 
-file record class PPMInternal(List<ShortIntervalList> Input, List<Interval> Result, int N, bool LastDoubleList, int TN)
+file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Result, int N, bool LastDoubleList, int TN)
 {
 	private const int LZDictionarySize = 8388607;
 	private int startPos = 1;
 	private readonly SumSet<uint> globalSet = [], newItemsSet = [];
 	private const int maxDepth = 12;
-	private readonly LimitedQueue<List<Interval>> buffer = new(maxDepth);
+	private readonly LimitedQueue<NList<Interval>> buffer = new(maxDepth);
 	private G.IEqualityComparer<NList<uint>> comparer = default!;
 	private FastDelHashSet<NList<uint>> contextHS = default!;
 	private HashList<int> lzhl = default!;
@@ -73,7 +73,7 @@ file record class PPMInternal(List<ShortIntervalList> Input, List<Interval> Resu
 	private readonly NList<uint> context = new(maxDepth), context2 = new(maxDepth);
 	private readonly SumSet<uint> set = [], excludingSet = [];
 	private SumSet<uint> set2 = [];
-	private readonly List<Interval> intervalsForBuffer = [];
+	private readonly NList<Interval> intervalsForBuffer = [];
 	private int nextTarget = 0;
 
 	public bool Encode()
@@ -334,7 +334,7 @@ internal record class PPMBits(int TN)
 		ar.WriteCount((uint)dicsize);
 		(uint Zeros, uint Units) globalSet = (1, 1);
 		var maxDepth = 96;
-		LimitedQueue<List<Interval>> buffer = new(maxDepth);
+		LimitedQueue<NList<Interval>> buffer = new(maxDepth);
 		var comparer = new EComparer<BitList>((x, y) => x.Equals(y), x => unchecked(x.Progression(17 * 23 + x.Length, (x, y) => x * 23 + y.GetHashCode())));
 		FastDelHashSet<BitList> contextHS = new(comparer);
 		HashList<BitList> lzhl = new(comparer);
@@ -349,7 +349,7 @@ internal record class PPMBits(int TN)
 			if (i < nextTarget)
 				goto l1;
 			var index = -1;
-			List<Interval> intervals = [];
+			NList<Interval> intervals = [];
 			if (context.Length == maxDepth && i >= maxDepth << 1 && ProcessLZ(context, item, i) && i < nextTarget)
 				goto l1;
 			for (; context.Length > 0 && !contextHS.TryGetIndexOf(context, out index); context.RemoveAt(^1)) ;

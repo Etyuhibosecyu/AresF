@@ -20,7 +20,7 @@ internal record class AdaptiveHuffmanF(int TN)
 		return ar;
 	}
 
-	private bool AdaptiveHuffmanInternal(ArithmeticEncoder ar, List<ShortIntervalList> input, LZData lzData, int n = 1)
+	private bool AdaptiveHuffmanInternal(ArithmeticEncoder ar, List<ShortIntervalList> input, LZData lzData)
 	{
 		Prerequisites(input);
 		ar.WriteCount((uint)input.Length);
@@ -44,7 +44,7 @@ internal record class AdaptiveHuffmanF(int TN)
 		firstIntervalDist = lz ? (lzData.Dist.R == 1 ? lzData.Dist.Threshold + 2 : lzData.Dist.Max + 1) + lzData.UseSpiralLengths : 0;
 		if (lz)
 			set.Add((newBase - 1, 1));
-		new AdaptiveHuffmanMain(ar, input, lzData, n, startPos, lz, newBase, set, lengthsSL, distsSL, firstIntervalDist, TN).MainProcess();
+		new AdaptiveHuffmanMain(ar, input, lzData, startPos, lz, newBase, set, lengthsSL, distsSL, firstIntervalDist, TN).MainProcess();
 		return true;
 	}
 
@@ -72,7 +72,7 @@ internal record class AdaptiveHuffmanF(int TN)
 	}
 }
 
-file sealed record class AdaptiveHuffmanMain(ArithmeticEncoder Ar, List<ShortIntervalList> Input, LZData LZData, int N, int StartPos, bool LZ, uint NewBase, SumSet<uint> Set, SumList LengthsSL, SumList DistsSL, uint FirstIntervalDist, int TN)
+file sealed record class AdaptiveHuffmanMain(ArithmeticEncoder Ar, List<ShortIntervalList> Input, LZData LZData, int StartPos, bool LZ, uint NewBase, SumSet<uint> Set, SumList LengthsSL, SumList DistsSL, uint FirstIntervalDist, int TN)
 {
 	private int frequency, fullLength;
 	private uint lzLength, lzDist, lzSpiralLength, maxDist, bufferInterval;
@@ -91,8 +91,7 @@ file sealed record class AdaptiveHuffmanMain(ArithmeticEncoder Ar, List<ShortInt
 			if (frequency == 0)
 			{
 				Ar.WritePart((uint)Set.ValuesSum, bufferInterval, fullBase);
-				if (N != 2)
-					Ar.WriteEqual(item, NewBase);
+				Ar.WriteEqual(item, NewBase);
 			}
 			else
 				Ar.WritePart((uint)sum, (uint)frequency, fullBase);

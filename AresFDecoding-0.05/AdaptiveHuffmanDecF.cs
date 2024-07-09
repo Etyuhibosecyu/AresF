@@ -8,7 +8,7 @@ public class AdaptiveHuffmanDecF
 	protected List<ShortIntervalList> result = default!;
 	protected NList<byte> skipped = default!;
 	protected SumSet<uint> set = default!;
-	protected List<Interval> uniqueList = default!;
+	protected NList<Interval> uniqueList = default!;
 	protected LZData lzData = default!;
 	protected uint fileBase, nextWordLink;
 	protected int lz, bwt, fullLength, counter;

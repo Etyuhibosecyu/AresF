@@ -71,7 +71,7 @@ internal record class LZMA(int TN)
 		}
 		result.FilterInPlace((x, index) => index == 0 || !elementsReplaced[index]);
 		elementsReplaced.Dispose();
-		List<Interval> c = [new Interval((uint)rDist, 3)];
+		NList<Interval> c = [new Interval((uint)rDist, 3)];
 		c.WriteCount(maxDist, 24);
 		if (rDist != 0)
 			c.Add(new(thresholdDist, maxDist + 1));

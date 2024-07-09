@@ -265,7 +265,7 @@ public class DecodingF
 			for (var i = fullLength; i > 0; i -= (int)length + 2)
 			{
 				var length2 = (int)Min(length + 2, i);
-				result.AddRange(result.GetRange(start, length2));
+				result.AddRange(result.GetSlice(start, length2));
 			}
 		}
 		return result;

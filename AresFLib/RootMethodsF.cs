@@ -123,7 +123,9 @@ internal partial class Compression(NList<byte> originalFile, List<ShortIntervalL
 		var ppm = new PPM(tn);
 		var input2 = input.GetSlice(1).SplitIntoEqual(16000000);
 		input2[0].Insert(0, input[0]);
-		s = ppm.Encode(input2, true);
+		if (input2.Length > 1)
+			throw new EncoderFallbackException();
+		s = ppm.Encode(input);
 		ppm.Dispose();
 		Subtotal[tn] += ProgressBarStep;
 		if (s.Length < originalFile.Length && s.Length > 0)

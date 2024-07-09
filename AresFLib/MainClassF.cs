@@ -146,9 +146,9 @@ public static class MainClassF
 			Supertotal = 0;
 			isWorking = true;
 			if (action == Compress)
-				fragmentCount = (int)Max(Min((new FileInfo(filename).Length + FragmentLength - 1) / FragmentLength, int.MaxValue / 10), 1);
+				fragmentCount = (int)Min((new FileInfo(filename).Length + FragmentLength - 1) / FragmentLength, int.MaxValue / 10);
 			rfs = File.OpenRead(filename);
-			tempFilename = (Environment.GetEnvironmentVariable("temp") ?? throw new IOException()) + @"\AresT-" + Environment.ProcessId + ".tmp";
+			tempFilename = (Environment.GetEnvironmentVariable("temp") ?? throw new IOException()) + @"\AresF-" + Environment.ProcessId + ".tmp";
 			wfs = File.Open(tempFilename, FileMode.Create);
 			action(rfs, wfs);
 			rfs.Close();
@@ -242,7 +242,7 @@ public static class MainClassF
 	public static void Compress(FileStream rfs, FileStream wfs)
 	{
 		var bytes = Array.Empty<byte>();
-		if (continue_)
+		if (continue_ && fragmentCount != 0)
 		{
 			Supertotal = 0;
 			SupertotalMaximum = fragmentCount * 10;
@@ -274,7 +274,7 @@ public static class MainClassF
 			bits.CopyTo(bytes, 0);
 			wfs.Write(bytes, 0, bytes.Length);
 		}
-		if (fragmentCount != 1)
+		if (fragmentCount > 1)
 			bytes = new byte[FragmentLength];
 		for (; fragmentCount > 0; fragmentCount--)
 		{
@@ -292,10 +292,10 @@ public static class MainClassF
 			Supertotal += ProgressBarStep;
 			GC.Collect();
 		}
-		if (wfs.Position > rfs.Length + 2)
+		if (wfs.Position >= rfs.Length)
 		{
 			wfs.Seek(0, SeekOrigin.Begin);
-			wfs.Write([0], 0, 1);
+			wfs.Write([0]);
 			rfs.Seek(0, SeekOrigin.Begin);
 			var bytes2 = rfs.Length < FragmentLength ? default! : new byte[FragmentLength];
 			for (var i = 0; i < rfs.Length; i += FragmentLength)
