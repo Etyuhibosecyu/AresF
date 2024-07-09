@@ -58,23 +58,23 @@ file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Res
 {
 	private const int LZDictionarySize = 8388607;
 	private int startPos = 1;
-	private readonly SumSet<uint> globalSet = [], newItemsSet = [];
-	private const int maxDepth = 12;
-	private readonly LimitedQueue<NList<Interval>> buffer = new(maxDepth);
+	private readonly SumSet<uint> globalFreqTable = [], newItemsFreqTable = [];
+	private const int maxContextDepth = 12;
+	private readonly LimitedQueue<NList<Interval>> buffer = new(maxContextDepth);
 	private G.IEqualityComparer<NList<uint>> comparer = default!;
-	private FastDelHashSet<NList<uint>> contextHS = default!;
-	private HashList<int> lzhl = default!;
-	private readonly List<SumSet<uint>> sumSets = [];
+	private FastDelHashSet<NList<uint>> contextSet = default!;
+	private HashList<int> lzBuffer = default!;
+	private readonly List<SumSet<uint>> contextFreqTableByLevel = [];
 	private readonly SumSet<uint> lzPositions = [(uint.MaxValue, 100)];
-	private readonly SumList lzLengthsSL = [];
+	private readonly SumList lzLengths = [];
 	private uint lzCount, notLZCount, spaceCount, notSpaceCount;
-	private readonly LimitedQueue<bool> spaceBuffer = new(maxDepth);
-	private readonly LimitedQueue<uint> newItemsBuffer = new(maxDepth);
-	private readonly NList<uint> context = new(maxDepth), context2 = new(maxDepth);
-	private readonly SumSet<uint> set = [], excludingSet = [];
-	private SumSet<uint> set2 = [];
+	private readonly LimitedQueue<bool> spaceBuffer = new(maxContextDepth);
+	private readonly LimitedQueue<uint> newItemsBuffer = new(maxContextDepth);
+	private readonly NList<uint> context = new(maxContextDepth), reservedContext = new(maxContextDepth);
+	private readonly SumSet<uint> freqTable = [], excludingfreqTable = [];
+	private SumSet<uint> outputFreqTable = [];
 	private readonly NList<Interval> intervalsForBuffer = [];
-	private int nextTarget = 0;
+	private int lzBlockEnd = 0;
 
 	public bool Encode()
 	{
@@ -101,24 +101,24 @@ file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Res
 		for (var i = startPos; i < Input.Length; i++, _ = LastDoubleList ? Status[TN] = i : 0)
 		{
 			var item = Input[i][0].Lower;
-			Input.GetSlice(Max(startPos, i - maxDepth)..i).ForEach((x, index) => context.SetOrAdd(index, x[0].Lower));
+			Input.GetSlice(Max(startPos, i - maxContextDepth)..i).ForEach((x, index) => context.SetOrAdd(index, x[0].Lower));
 			context.Reverse();
-			context2.Replace(context);
-			if (i < nextTarget)
+			reservedContext.Replace(context);
+			if (i < lzBlockEnd)
 				goto l1;
 			intervalsForBuffer.Clear();
-			if (context.Length == maxDepth && i >= (maxDepth << 1) + startPos && ProcessLZ(context, i) && i < nextTarget)
+			if (context.Length == maxContextDepth && i >= (maxContextDepth << 1) + startPos && ProcessLZ(context, i) && i < lzBlockEnd)
 				goto l1;
-			set.Clear();
-			excludingSet.Clear();
+			freqTable.Clear();
+			excludingfreqTable.Clear();
 			Escape(item, out var sum, out var frequency);
 			ProcessFrequency(item, ref sum, ref frequency);
 			ProcessBuffers(i);
 		l1:
-			var contextLength = context2.Length;
-			Increase(context2, context, item, out var hlIndex);
-			if (contextLength == maxDepth)
-				lzhl.SetOrAdd((i - startPos - maxDepth) % LZDictionarySize, hlIndex);
+			var contextLength = reservedContext.Length;
+			Increase(reservedContext, context, item, out var hlIndex);
+			if (contextLength == maxContextDepth)
+				lzBuffer.SetOrAdd((i - startPos - maxContextDepth) % LZDictionarySize, hlIndex);
 		}
 		while (buffer.Length != 0)
 			buffer.Dequeue().ForEach(x => Result.Add(new(x.Lower, x.Length, x.Base)));
@@ -127,68 +127,68 @@ file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Res
 
 	private void PrepareFields(uint inputBase)
 	{
-		globalSet.Clear();
+		globalFreqTable.Clear();
 		if (N == 2)
-			newItemsSet.Clear();
+			newItemsFreqTable.Clear();
 		else
-			newItemsSet.Replace(new Chain((int)inputBase).Convert(x => ((uint)x, 1)));
+			newItemsFreqTable.Replace(new Chain((int)inputBase).Convert(x => ((uint)x, 1)));
 		buffer.Clear();
 		comparer = N == 2 ? new NListEComparer<uint>() : new EComparer<NList<uint>>((x, y) => x.Equals(y), x => unchecked(x.Progression(17 * 23 + x.Length, (x, y) => x * 23 + y.GetHashCode())));
-		contextHS = new(comparer);
-		lzhl = [];
-		sumSets.Clear();
-		lzLengthsSL.Replace([1]);
+		contextSet = new(comparer);
+		lzBuffer = [];
+		contextFreqTableByLevel.Clear();
+		lzLengths.Replace([1]);
 		lzCount = notLZCount = spaceCount = notSpaceCount = 1;
 		spaceBuffer.Clear();
 		newItemsBuffer.Clear();
 		context.Clear();
-		context2.Clear();
-		set.Clear();
-		excludingSet.Clear();
+		reservedContext.Clear();
+		freqTable.Clear();
+		excludingfreqTable.Clear();
 		intervalsForBuffer.Clear();
-		nextTarget = 0;
+		lzBlockEnd = 0;
 	}
 
 	private void Escape(uint item, out long sum, out int frequency)
 	{
-		for (; context.Length > 0 && !contextHS.TryGetIndexOf(context, out _); context.RemoveAt(^1)) ;
+		for (; context.Length > 0 && !contextSet.TryGetIndexOf(context, out _); context.RemoveAt(^1)) ;
 		sum = 0;
 		frequency = 0;
-		for (; context.Length > 0 && contextHS.TryGetIndexOf(context, out var index) && (sum = set.Replace(sumSets[index]).ExceptWith(excludingSet).GetLeftValuesSum(item, out frequency)) >= 0 && frequency == 0; context.RemoveAt(^1), excludingSet.UnionWith(set))
-			if (set.Length != 0)
-				intervalsForBuffer.Add(new((uint)set.ValuesSum, (uint)set.Length * 100, (uint)(set.ValuesSum + set.Length * 100)));
-		if (set.Length == 0 || context.Length == 0)
+		for (; context.Length > 0 && contextSet.TryGetIndexOf(context, out var index) && (sum = freqTable.Replace(contextFreqTableByLevel[index]).ExceptWith(excludingfreqTable).GetLeftValuesSum(item, out frequency)) >= 0 && frequency == 0; context.RemoveAt(^1), excludingfreqTable.UnionWith(freqTable))
+			if (freqTable.Length != 0)
+				intervalsForBuffer.Add(new((uint)freqTable.ValuesSum, (uint)freqTable.Length * 100, (uint)(freqTable.ValuesSum + freqTable.Length * 100)));
+		if (freqTable.Length == 0 || context.Length == 0)
 		{
-			excludingSet.ForEach(x => excludingSet.Update(x.Key, globalSet.TryGetValue(x.Key, out var newValue) ? newValue : throw new EncoderFallbackException()));
-			set2 = globalSet.ExceptWith(excludingSet);
+			excludingfreqTable.ForEach(x => excludingfreqTable.Update(x.Key, globalFreqTable.TryGetValue(x.Key, out var newValue) ? newValue : throw new EncoderFallbackException()));
+			outputFreqTable = globalFreqTable.ExceptWith(excludingfreqTable);
 		}
 		else
-			set2 = set;
+			outputFreqTable = freqTable;
 	}
 
 	private void ProcessFrequency(uint item, ref long sum, ref int frequency)
 	{
 		if (frequency == 0)
-			sum = set2.GetLeftValuesSum(item, out frequency);
+			sum = outputFreqTable.GetLeftValuesSum(item, out frequency);
 		if (frequency == 0)
 		{
-			if (set2.Length != 0)
-				intervalsForBuffer.Add(new((uint)set2.ValuesSum, (uint)set2.Length * 100, (uint)(set2.ValuesSum + set2.Length * 100)));
+			if (outputFreqTable.Length != 0)
+				intervalsForBuffer.Add(new((uint)outputFreqTable.ValuesSum, (uint)outputFreqTable.Length * 100, (uint)(outputFreqTable.ValuesSum + outputFreqTable.Length * 100)));
 			if (N != 2)
 			{
-				intervalsForBuffer.Add(new((uint)newItemsSet.IndexOf(item), (uint)newItemsSet.Length));
-				newItemsSet.RemoveValue(item);
+				intervalsForBuffer.Add(new((uint)newItemsFreqTable.IndexOf(item), (uint)newItemsFreqTable.Length));
+				newItemsFreqTable.RemoveValue(item);
 				newItemsBuffer.Enqueue(item);
 			}
 		}
 		else
 		{
-			intervalsForBuffer.Add(new(0, (uint)set2.ValuesSum, (uint)(set2.ValuesSum + set2.Length * 100)));
-			intervalsForBuffer.Add(new((uint)sum, (uint)frequency, (uint)set2.ValuesSum));
+			intervalsForBuffer.Add(new(0, (uint)outputFreqTable.ValuesSum, (uint)(outputFreqTable.ValuesSum + outputFreqTable.Length * 100)));
+			intervalsForBuffer.Add(new((uint)sum, (uint)frequency, (uint)outputFreqTable.ValuesSum));
 			newItemsBuffer.Enqueue(uint.MaxValue);
 		}
-		if (set.Length == 0 || context.Length == 0)
-			globalSet.UnionWith(excludingSet);
+		if (freqTable.Length == 0 || context.Length == 0)
+			globalFreqTable.UnionWith(excludingfreqTable);
 	}
 
 	private void ProcessBuffers(int i)
@@ -223,15 +223,15 @@ file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Res
 			return false;
 		var bestPos = -1;
 		var bestLength = -1;
-		var contextIndex = contextHS.IndexOf(context);
-		var indexes = lzhl.IndexesOf(contextIndex).Sort();
+		var contextIndex = contextSet.IndexOf(context);
+		var indexes = lzBuffer.IndexesOf(contextIndex).Sort();
 		for (var i = 0; i < indexes.Length; i++)
 		{
 			var pos = indexes[i];
-			var dist = (pos - (curPos - startPos - maxDepth)) % LZDictionarySize + curPos - startPos - maxDepth;
+			var dist = (pos - (curPos - startPos - maxContextDepth)) % LZDictionarySize + curPos - startPos - maxContextDepth;
 			int length;
-			for (length = -maxDepth; length < Input.Length - startPos - curPos && RedStarLinq.Equals(Input[curPos + length], Input[dist + maxDepth + startPos + length], (x, y) => x.Lower == y.Lower); length++) ;
-			if (curPos - (dist + maxDepth + startPos) >= 2 && length > bestLength)
+			for (length = -maxContextDepth; length < Input.Length - startPos - curPos && RedStarLinq.Equals(Input[curPos + length], Input[dist + maxContextDepth + startPos + length], (x, y) => x.Lower == y.Lower); length++) ;
+			if (curPos - (dist + maxContextDepth + startPos) >= 2 && length > bestLength)
 			{
 				bestPos = pos;
 				bestLength = length;
@@ -257,66 +257,66 @@ file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Res
 		{
 			Result.Add(new((uint)lzPositions.GetLeftValuesSum(uint.MaxValue, out var escapeFrequency), (uint)escapeFrequency, (uint)lzPositions.ValuesSum));
 			lzPositions.Update(uint.MaxValue, escapeFrequency + 100);
-			Result.Add(new((uint)bestPos, (uint)Min(curPos - startPos - maxDepth, LZDictionarySize - 1)));
+			Result.Add(new((uint)bestPos, (uint)Min(curPos - startPos - maxContextDepth, LZDictionarySize - 1)));
 			lzPositions.Add((uint)bestPos, 100);
 		}
-		if (bestLength < lzLengthsSL.Length - 1)
+		if (bestLength < lzLengths.Length - 1)
 		{
-			Result.Add(new((uint)lzLengthsSL.GetLeftValuesSum(bestLength, out var frequency), (uint)frequency, (uint)lzLengthsSL.ValuesSum));
-			lzLengthsSL.Increase(bestLength);
+			Result.Add(new((uint)lzLengths.GetLeftValuesSum(bestLength, out var frequency), (uint)frequency, (uint)lzLengths.ValuesSum));
+			lzLengths.Increase(bestLength);
 		}
 		else
 		{
-			Result.Add(new((uint)(lzLengthsSL.ValuesSum - lzLengthsSL[^1]), (uint)lzLengthsSL[^1], (uint)lzLengthsSL.ValuesSum));
-			lzLengthsSL.Increase(lzLengthsSL.Length - 1);
-			foreach (var bit in EncodeFibonacci((uint)(bestLength - lzLengthsSL.Length + 2)))
+			Result.Add(new((uint)(lzLengths.ValuesSum - lzLengths[^1]), (uint)lzLengths[^1], (uint)lzLengths.ValuesSum));
+			lzLengths.Increase(lzLengths.Length - 1);
+			foreach (var bit in EncodeFibonacci((uint)(bestLength - lzLengths.Length + 2)))
 				Result.Add(new(bit ? 1u : 0, 2));
-			new Chain(bestLength - lzLengthsSL.Length + 1).ForEach(x => lzLengthsSL.Insert(lzLengthsSL.Length - 1, 1));
+			new Chain(bestLength - lzLengths.Length + 1).ForEach(x => lzLengths.Insert(lzLengths.Length - 1, 1));
 		}
 		buffer.Clear();
 		spaceBuffer.Clear();
 		if (N != 2)
-			newItemsBuffer.Filter(x => x != uint.MaxValue).ForEach(x => newItemsSet.Add((x, 1)));
+			newItemsBuffer.Filter(x => x != uint.MaxValue).ForEach(x => newItemsFreqTable.Add((x, 1)));
 		newItemsBuffer.Clear();
-		nextTarget = curPos + bestLength;
+		lzBlockEnd = curPos + bestLength;
 		return true;
 	}
 
 	void Increase(NList<uint> context, NList<uint> successContext, uint item, out int outIndex)
 	{
 		outIndex = -1;
-		for (; context.Length > 0 && contextHS.TryAdd(context.Copy(), out var index); context.RemoveAt(^1))
+		for (; context.Length > 0 && contextSet.TryAdd(context.Copy(), out var index); context.RemoveAt(^1))
 		{
 			if (outIndex == -1)
 				outIndex = index;
-			sumSets.SetOrAdd(index, [(item, 100)]);
+			contextFreqTableByLevel.SetOrAdd(index, [(item, 100)]);
 		}
 		var successLength = context.Length;
 		_ = context.Length == 0 ? null : successContext.Replace(context).RemoveAt(^1);
-		for (; context.Length > 0 && contextHS.TryGetIndexOf(context, out var index); context.RemoveAt(^1), _ = context.Length == 0 ? null : successContext.RemoveAt(^1))
+		for (; context.Length > 0 && contextSet.TryGetIndexOf(context, out var index); context.RemoveAt(^1), _ = context.Length == 0 ? null : successContext.RemoveAt(^1))
 		{
 			if (outIndex == -1)
 				outIndex = index;
-			if (!sumSets[index].TryGetValue(item, out var itemValue))
+			if (!contextFreqTableByLevel[index].TryGetValue(item, out var itemValue))
 			{
-				sumSets[index].Add(item, 100);
+				contextFreqTableByLevel[index].Add(item, 100);
 				continue;
 			}
 			else if (context.Length == 1 || itemValue > 100)
 			{
-				sumSets[index].Update(item, itemValue + (int)Max(Round((double)100 / (successLength - context.Length + 1)), 1));
+				contextFreqTableByLevel[index].Update(item, itemValue + (int)Max(Round((double)100 / (successLength - context.Length + 1)), 1));
 				continue;
 			}
-			var successIndex = contextHS.IndexOf(successContext);
-			if (!sumSets[successIndex].TryGetValue(item, out var successValue))
+			var successIndex = contextSet.IndexOf(successContext);
+			if (!contextFreqTableByLevel[successIndex].TryGetValue(item, out var successValue))
 				successValue = 100;
-			var step = (double)(sumSets[index].ValuesSum + sumSets[index].Length * 100) * successValue / (sumSets[index].ValuesSum + sumSets[successIndex].ValuesSum + sumSets[successIndex].Length * 100 - successValue);
-			sumSets[index].Update(item, (int)(Max(Round(step), 1) + itemValue));
+			var step = (double)(contextFreqTableByLevel[index].ValuesSum + contextFreqTableByLevel[index].Length * 100) * successValue / (contextFreqTableByLevel[index].ValuesSum + contextFreqTableByLevel[successIndex].ValuesSum + contextFreqTableByLevel[successIndex].Length * 100 - successValue);
+			contextFreqTableByLevel[index].Update(item, (int)(Max(Round(step), 1) + itemValue));
 		}
-		if (globalSet.TryGetValue(item, out var globalValue))
-			globalSet.Update(item, globalValue + (int)Max(Round((double)100 / (successLength + 1)), 1));
+		if (globalFreqTable.TryGetValue(item, out var globalValue))
+			globalFreqTable.Update(item, globalValue + (int)Max(Round((double)100 / (successLength + 1)), 1));
 		else
-			globalSet.Add(item, 100);
+			globalFreqTable.Add(item, 100);
 	}
 }
 
