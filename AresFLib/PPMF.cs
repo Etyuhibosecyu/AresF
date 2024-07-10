@@ -71,7 +71,7 @@ file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Res
 	private readonly LimitedQueue<bool> spaceBuffer = new(maxContextDepth);
 	private readonly LimitedQueue<uint> newItemsBuffer = new(maxContextDepth);
 	private readonly NList<uint> context = new(maxContextDepth), reservedContext = new(maxContextDepth);
-	private readonly SumSet<uint> freqTable = [], excludingfreqTable = [];
+	private readonly SumSet<uint> freqTable = [], excludingFreqTable = [];
 	private SumSet<uint> outputFreqTable = [];
 	private readonly NList<Interval> intervalsForBuffer = [];
 	private int lzBlockEnd = 0;
@@ -89,7 +89,7 @@ file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Res
 			if (i >= lzBlockEnd && (context.Length != maxContextDepth || i < (maxContextDepth << 1) + startPos || !ProcessLZ(context, i) || i >= lzBlockEnd))
 			{
 				freqTable.Clear();
-				excludingfreqTable.Clear();
+				excludingFreqTable.Clear();
 				Escape(item, out var sum, out var frequency);
 				ProcessFrequency(item, ref sum, ref frequency);
 				ProcessBuffers(i);
@@ -106,7 +106,8 @@ file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Res
 
 	private void Prerequisites()
 	{
-		if (!(Input.Length >= 4 && Input[CreateVar(Input[0].Length >= 1 && Input[0][0] == LengthsApplied ? (int)Input[0][1].Base + 1 : 1, out startPos)].Length is 1 or 2 && Input[startPos][0].Length == 1 && CreateVar(Input[startPos][0].Base, out var inputBase) >= 2 && Input[startPos][^1].Length == 1 && Input.GetSlice(startPos + 1).All(x => x.Length == Input[startPos].Length && x[0].Length == 1 && x[0].Base == inputBase && (x.Length == 1 || x[1].Length == 1 && x[1].Base == Input[startPos][1].Base))))
+		if (!(Input.Length >= 4 && Input[CreateVar(Input[0].Length >= 1 && Input[0][0] == LengthsApplied ? (int)Input[0][1].Base + 1 : 1, out startPos)].Length is 1 or 2 && Input[startPos][0].Length == 1 && CreateVar(Input[startPos][0].Base, out var inputBase) >= 2
+			&& Input[startPos][^1].Length == 1 && Input.GetSlice(startPos + 1).All(x => x.Length == Input[startPos].Length && x[0].Length == 1 && x[0].Base == inputBase && (x.Length == 1 || x[1].Length == 1 && x[1].Base == Input[startPos][1].Base))))
 			throw new EncoderFallbackException();
 		if (LastDoubleList)
 		{
@@ -147,7 +148,7 @@ file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Res
 		context.Clear();
 		reservedContext.Clear();
 		freqTable.Clear();
-		excludingfreqTable.Clear();
+		excludingFreqTable.Clear();
 		intervalsForBuffer.Clear();
 		lzBlockEnd = 0;
 	}
@@ -157,13 +158,14 @@ file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Res
 		for (; context.Length > 0 && !contextSet.TryGetIndexOf(context, out _); context.RemoveAt(^1)) ;
 		sum = 0;
 		frequency = 0;
-		for (; context.Length > 0 && contextSet.TryGetIndexOf(context, out var index) && (sum = freqTable.Replace(contextFreqTableByLevel[index]).ExceptWith(excludingfreqTable).GetLeftValuesSum(item, out frequency)) >= 0 && frequency == 0; context.RemoveAt(^1), excludingfreqTable.UnionWith(freqTable))
+		for (; context.Length > 0 && contextSet.TryGetIndexOf(context, out var index) && (sum = freqTable.Replace(contextFreqTableByLevel[index]).ExceptWith(excludingFreqTable).GetLeftValuesSum(item, out frequency)) >= 0 && frequency == 0; context.RemoveAt(^1),
+			excludingFreqTable.UnionWith(freqTable))
 			if (freqTable.Length != 0)
 				intervalsForBuffer.Add(new((uint)freqTable.ValuesSum, (uint)freqTable.Length * 100, (uint)(freqTable.ValuesSum + freqTable.Length * 100)));
 		if (freqTable.Length == 0 || context.Length == 0)
 		{
-			excludingfreqTable.ForEach(x => excludingfreqTable.Update(x.Key, globalFreqTable.TryGetValue(x.Key, out var newValue) ? newValue : throw new EncoderFallbackException()));
-			outputFreqTable = globalFreqTable.ExceptWith(excludingfreqTable);
+			excludingFreqTable.ForEach(x => excludingFreqTable.Update(x.Key, globalFreqTable.TryGetValue(x.Key, out var newValue) ? newValue : throw new EncoderFallbackException()));
+			outputFreqTable = globalFreqTable.ExceptWith(excludingFreqTable);
 		}
 		else
 			outputFreqTable = freqTable;
@@ -191,7 +193,7 @@ file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Res
 			newItemsBuffer.Enqueue(uint.MaxValue);
 		}
 		if (freqTable.Length == 0 || context.Length == 0)
-			globalFreqTable.UnionWith(excludingfreqTable);
+			globalFreqTable.UnionWith(excludingFreqTable);
 	}
 
 	private void ProcessBuffers(int i)
@@ -295,7 +297,8 @@ file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Res
 			contextFreqTableByLevel.SetOrAdd(index, [(item, 100)]);
 		}
 		var successLength = context.Length;
-		_ = context.Length == 0 ? null : successContext.Replace(context).RemoveAt(^1);
+		if (context.Length != 0)
+			successContext.Replace(context).RemoveAt(^1);
 		for (; context.Length > 0 && contextSet.TryGetIndexOf(context, out var index); context.RemoveAt(^1), _ = context.Length == 0 ? null : successContext.RemoveAt(^1))
 		{
 			if (outIndex == -1)
@@ -313,7 +316,8 @@ file record class PPMInternal(List<ShortIntervalList> Input, NList<Interval> Res
 			var successIndex = contextSet.IndexOf(successContext);
 			if (!contextFreqTableByLevel[successIndex].TryGetValue(item, out var successValue))
 				successValue = 100;
-			var step = (double)(contextFreqTableByLevel[index].ValuesSum + contextFreqTableByLevel[index].Length * 100) * successValue / (contextFreqTableByLevel[index].ValuesSum + contextFreqTableByLevel[successIndex].ValuesSum + contextFreqTableByLevel[successIndex].Length * 100 - successValue);
+			var step = (double)(contextFreqTableByLevel[index].ValuesSum + contextFreqTableByLevel[index].Length * 100) * successValue
+				/ (contextFreqTableByLevel[index].ValuesSum + contextFreqTableByLevel[successIndex].ValuesSum + contextFreqTableByLevel[successIndex].Length * 100 - successValue);
 			contextFreqTableByLevel[index].Update(item, (int)(Max(Round(step), 1) + itemValue));
 		}
 		if (globalFreqTable.TryGetValue(item, out var globalValue))
