@@ -39,12 +39,23 @@ internal record class AdaptiveHuffmanF(int TN)
 		StatusMaximum[TN] = input.Length - startPos;
 		Current[TN] += ProgressBarStep;
 		set.Clear();
-		lengthsSL.Replace(lz ? RedStarLinq.NFill(1, (int)(lzData.Length.R == 0 ? lzData.Length.Max + 1 : lzData.Length.R == 1 ? lzData.Length.Threshold + 2 : lzData.Length.Max - lzData.Length.Threshold + 2)) : []);
-		distsSL.Replace(lz ? RedStarLinq.NFill(1, (int)lzData.UseSpiralLengths + 1) : []);
-		firstIntervalDist = lz ? (lzData.Dist.R == 1 ? lzData.Dist.Threshold + 2 : lzData.Dist.Max + 1) + lzData.UseSpiralLengths : 0;
+		if (lz)
+		{
+			using var streamOfUnits = RedStarLinq.NFill(1, (int)(lzData.Length.R == 0 ? lzData.Length.Max + 1 : lzData.Length.R == 1 ? lzData.Length.Threshold + 2 : lzData.Length.Max - lzData.Length.Threshold + 2));
+			lengthsSL.Replace(streamOfUnits);
+			streamOfUnits.Remove((int)lzData.UseSpiralLengths + 1);
+			distsSL.Replace(streamOfUnits);
+			firstIntervalDist = (lzData.Dist.R == 1 ? lzData.Dist.Threshold + 2 : lzData.Dist.Max + 1) + lzData.UseSpiralLengths;
+		}
+		else
+		{
+			lengthsSL.Clear();
+			distsSL.Clear();
+			firstIntervalDist = 0;
+		}
 		if (lz)
 			set.Add((newBase - 1, 1));
-		new AdaptiveHuffmanMain(ar, input, lzData, startPos, lz, newBase, set, lengthsSL, distsSL, firstIntervalDist, TN).MainProcess();
+		new Encoder(ar, input, lzData, startPos, lz, newBase, set, lengthsSL, distsSL, firstIntervalDist, TN).MainProcess();
 		return true;
 	}
 
@@ -72,7 +83,7 @@ internal record class AdaptiveHuffmanF(int TN)
 	}
 }
 
-file sealed record class AdaptiveHuffmanMain(ArithmeticEncoder Ar, List<ShortIntervalList> Input, LZData LZData, int StartPos, bool LZ, uint NewBase, SumSet<uint> Set, SumList LengthsSL, SumList DistsSL, uint FirstIntervalDist, int TN)
+file sealed record class Encoder(ArithmeticEncoder Ar, List<ShortIntervalList> Input, LZData LZData, int StartPos, bool LZ, uint NewBase, SumSet<uint> Set, SumList LengthsSL, SumList DistsSL, uint FirstIntervalDist, int TN)
 {
 	private int frequency, fullLength;
 	private uint lzLength, lzDist, lzSpiralLength, maxDist, bufferInterval;

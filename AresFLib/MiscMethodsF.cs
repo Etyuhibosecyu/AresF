@@ -3,7 +3,7 @@ using Mpir.NET;
 
 namespace AresFLib;
 
-partial class Compression
+internal partial class Compression
 {
 	private BitList ArchaicHuffman(List<ShortIntervalList> input)
 	{

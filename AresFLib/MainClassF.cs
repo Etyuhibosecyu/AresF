@@ -13,7 +13,7 @@ public static class MainClassF
 	private static FileStream rfs = default!;
 	private static FileStream wfs = default!;
 	private static int fragmentCount;
-	private static bool continue_ = true;
+	private static readonly bool continue_ = true;
 	private static bool isWorking;
 	private static readonly object lockObj = new();
 

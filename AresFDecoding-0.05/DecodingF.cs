@@ -345,7 +345,8 @@ public class DecodingF
 				zeroCode.Add(byteList[i++] == zero ? '0' : '1');
 				length = (int)(new MpzT(zeroCode.ToString(), 2) - 1);
 			}
-			result.AddRange(RedStarLinq.NFill(zero, length));
+			using var streamOfZeros = RedStarLinq.NFill(zero, length);
+			result.AddRange(streamOfZeros);
 		}
 		return result;
 	}
