@@ -31,19 +31,47 @@ internal partial class Compression(NList<byte> originalFile, List<ShortIntervalL
 		}
 		originalFile2 = cstring;
 		cdl = new ShortIntervalList[originalFile2.Length + 1];
-		cdl[0] = [RepeatsNotApplied];
+		cdl[0] = [];
 		var originalFile2_ = originalFile2;
 		Parallel.For(0, originalFile2.Length, i => cdl[i + 1] = ByteIntervals[originalFile2_[i]]);
 		Subtotal[tn] += ProgressBarStep;
 		return cdl;
 	}
 
-	internal void Encode1(ref byte[] cs, ref int hf, ref int lz)
+	internal void Encode1(ref byte[] cs, ref int hf)
+	{
+		byte[] s;
+		List<ShortIntervalList> dl1, cdl = input;
+		Subtotal[tn] = 0;
+		SubtotalMaximum[tn] = ProgressBarStep * 4;
+		Subtotal[tn] += ProgressBarStep;
+		dl1 = new(new BWTF(result, tn).Encode(cdl));
+		Subtotal[tn] += ProgressBarStep;
+		if ((PresentMethodsF & UsedMethodsF.AHF1) != 0)
+		{
+			s = new AdaptiveHuffmanGlobal(tn).Encode(dl1, new());
+			Subtotal[tn] += ProgressBarStep;
+		}
+		else
+		{
+			dl1 = new(new Huffman(dl1, result, tn).Encode());
+			Subtotal[tn] += ProgressBarStep;
+			s = WorkUpDoubleList(dl1, tn);
+		}
+		Subtotal[tn] += ProgressBarStep;
+		if (s.Length < cs.Length && s.Length > 0)
+		{
+			hf = (PresentMethodsF & UsedMethodsF.AHF1) != 0 ? 4 : 5;
+			cs = s;
+		}
+	}
+
+	internal void Encode2(ref byte[] cs, ref int hf, ref int lz)
 	{
 		byte[] s;
 		List<ShortIntervalList> dl1, cdl = input;
 		LZData lzData = new();
-		if ((PresentMethodsF & UsedMethodsF.LZ1) != 0)
+		if ((PresentMethodsF & UsedMethodsF.LZ2) != 0)
 		{
 			dl1 = new LempelZiv(cdl, result, tn).Encode(out lzData);
 			Subtotal[tn] += ProgressBarStep;
@@ -62,40 +90,12 @@ internal partial class Compression(NList<byte> originalFile, List<ShortIntervalL
 			cdl = dl1;
 			cs = s;
 		}
-		if ((PresentMethodsF & UsedMethodsF.HF1) != 0)
-			s = new AdaptiveHuffmanF(tn).Encode(cdl, lzData);
+		if ((PresentMethodsF & UsedMethodsF.HF2) != 0)
+			s = new AdaptiveHuffmanGlobal(tn).Encode(cdl, lzData);
 		Subtotal[tn] += ProgressBarStep;
 		if (s.Length < cs.Length && s.Length > 0)
 		{
 			hf = 2;
-			cs = s;
-		}
-	}
-
-	internal void Encode2(ref byte[] cs, ref int hf)
-	{
-		byte[] s;
-		List<ShortIntervalList> dl1, cdl = input;
-		Subtotal[tn] = 0;
-		SubtotalMaximum[tn] = ProgressBarStep * 4;
-		Subtotal[tn] += ProgressBarStep;
-		dl1 = new(BWT(cdl));
-		Subtotal[tn] += ProgressBarStep;
-		if ((PresentMethodsF & UsedMethodsF.AHF2) != 0)
-		{
-			s = new AdaptiveHuffmanF(tn).Encode(dl1, new());
-			Subtotal[tn] += ProgressBarStep;
-		}
-		else
-		{
-			dl1 = new(new Huffman(dl1, result, tn).Encode());
-			Subtotal[tn] += ProgressBarStep;
-			s = WorkUpDoubleList(dl1, tn);
-		}
-		Subtotal[tn] += ProgressBarStep;
-		if (s.Length < cs.Length && s.Length > 0)
-		{
-			hf = (PresentMethodsF & UsedMethodsF.AHF2) != 0 ? 4 : 5;
 			cs = s;
 		}
 	}
@@ -105,7 +105,7 @@ internal partial class Compression(NList<byte> originalFile, List<ShortIntervalL
 		byte[] s;
 		Subtotal[tn] = 0;
 		SubtotalMaximum[tn] = ProgressBarStep * 4;
-		ArchaicHuffman(input);
+		new ArchaicHuffman(tn).Encode(input);
 		s = new LZMA(tn).Encode(input);
 		Subtotal[tn] += ProgressBarStep;
 		if (s.Length < originalFile.Length && s.Length > 0)
@@ -140,7 +140,7 @@ public record class Executions(byte[] OriginalFile)
 {
 	private readonly byte[][] s = RedStarLinq.FillArray(ProgressBarGroups, _ => OriginalFile);
 	private byte[] cs = OriginalFile;
-	private int hf = 0, bwt = 0, rle = 0, lz = 0, misc = 0, hfP1 = 0, lzP1 = 0, hfP2 = 0, miscP3 = 0, miscP4 = 0;
+	private int hf = 0, bwt = 0, rle = 0, lz = 0, misc = 0, hfP1 = 0, hfP2 = 0, lzP2 = 0, miscP3 = 0, miscP4 = 0;
 
 	public byte[] Encode()
 	{
@@ -164,13 +164,13 @@ public record class Executions(byte[] OriginalFile)
 		{
 			hf = hfP2;
 			bwt = 0;
+			lz = lzP2;
 			cs = s[1];
 		}
 		else if ((PresentMethodsF & UsedMethodsF.CS1) != 0 && s[0].Length < cs.Length && s[0].Length > 0)
 		{
 			hf = hfP1;
 			bwt = 0;
-			lz = lzP1;
 			cs = s[0];
 		}
 		else
@@ -189,7 +189,7 @@ public record class Executions(byte[] OriginalFile)
 			try
 			{
 				if ((PresentMethodsF & UsedMethodsF.CS1) != 0)
-					new Compression(originalFile2, mainInput, 0).Encode1(ref s[0], ref hfP1, ref lzP1);
+					new Compression(originalFile2, mainInput, 0).Encode1(ref s[0], ref hfP1);
 			}
 			catch
 			{
@@ -201,7 +201,7 @@ public record class Executions(byte[] OriginalFile)
 			try
 			{
 				if ((PresentMethodsF & UsedMethodsF.CS2) != 0)
-					new Compression(originalFile2, mainInput, 1).Encode2(ref s[1], ref hfP2);
+					new Compression(originalFile2, mainInput, 1).Encode2(ref s[1], ref hfP2, ref lzP2);
 			}
 			catch
 			{

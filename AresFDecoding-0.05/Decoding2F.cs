@@ -29,7 +29,6 @@ public class Decoding2F
 		arithmeticMap = [];
 		uniqueList = [];
 		skipped = [];
-		decoding.GetRepeatsCount();
 	}
 
 	public virtual List<ShortIntervalList> Decode()
@@ -91,7 +90,7 @@ public class Decoding2F
 			var counter2 = 4;
 			maxFrequency = (int)ar.ReadCount() + 1;
 			frequencyCount = (int)ar.ReadCount() + 1;
-			if (maxFrequency > decoding.GetFragmentLength() || frequencyCount > decoding.GetFragmentLength())
+			if (maxFrequency > GetFragmentLength() || frequencyCount > GetFragmentLength())
 				throw new DecoderFallbackException();
 			Status[0] = 0;
 			StatusMaximum[0] = frequencyCount;
@@ -135,7 +134,7 @@ public class Decoding2F
 			if (lz != 0)
 				arithmeticMap.Add(GetHuffmanBase(ValuesInByte));
 		}
-		if (counter is < 0 || counter > decoding.GetFragmentLength() + decoding.GetFragmentLength() / 1000)
+		if (counter is < 0 || counter > GetFragmentLength() + GetFragmentLength() / 1000)
 			throw new DecoderFallbackException();
 		HuffmanData huffmanData = new(maxFrequency, frequencyCount, arithmeticMap, uniqueList);
 		Current[0] += ProgressBarStep;
@@ -149,7 +148,7 @@ public class Decoding2F
 		return compressedList;
 	}
 
-	protected virtual List<ShortIntervalList> DecodeAdaptive() => new AdaptiveHuffmanDecF(decoding, ar, skipped, lzData, lz, bwt, counter).Decode();
+	protected virtual List<ShortIntervalList> DecodeAdaptive() => new AdaptiveHuffmanDecGlobal(decoding.CreateGlobalDecoding(), ar, skipped, lzData, lz, bwt, counter).Decode();
 
-	protected virtual uint GetHuffmanBase(uint oldBase) => GetBaseWithBuffer(oldBase);
+	protected virtual uint GetHuffmanBase(uint oldBase) => GetBaseWithBuffer(oldBase, false);
 }

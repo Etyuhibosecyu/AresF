@@ -77,7 +77,7 @@ public static class MainClassF
 
 	private static void ReceiveData()
 	{
-		var receiveLen = new byte[4];
+		var receiveLen = GC.AllocateUninitializedArray<byte>(4);
 		byte[] receiveMessage;
 		while (true)
 		{
@@ -86,7 +86,7 @@ public static class MainClassF
 				if (netStream != null)
 				{
 					netStream.ReadExactly(receiveLen);//чтение сообщения
-					receiveMessage = new byte[BitConverter.ToInt32(receiveLen)];
+					receiveMessage = GC.AllocateUninitializedArray<byte>(BitConverter.ToInt32(receiveLen));
 					netStream.ReadExactly(receiveMessage);
 					WorkUpReceiveMessage(receiveMessage);
 				}
@@ -109,6 +109,7 @@ public static class MainClassF
 			else if (message[0] == 1)
 			{
 				FragmentLength = 1000000 << Min(BitConverter.ToInt32(message.AsSpan(1..)) & 0xF, 11);
+				BWTBlockSize = new[] { 25000, 50000, 100000, 200000, 500000, 1000000 }[Min((BitConverter.ToInt32(message.AsSpan(1..)) & 0x70) >> 4, 5)];
 			}
 			else if (message[0] <= 4)
 			{
@@ -148,7 +149,7 @@ public static class MainClassF
 			if (action == Compress)
 				fragmentCount = (int)Min((new FileInfo(filename).Length + FragmentLength - 1) / FragmentLength, int.MaxValue / 10);
 			rfs = File.OpenRead(filename);
-			tempFilename = (Environment.GetEnvironmentVariable("temp") ?? throw new IOException()) + @"\AresF-" + Environment.ProcessId + ".tmp";
+			tempFilename = (Environment.GetEnvironmentVariable("temp") ?? throw new IOException()) + @"\Ares-" + Environment.ProcessId + ".tmp";
 			wfs = File.Open(tempFilename, FileMode.Create);
 			action(rfs, wfs);
 			rfs.Close();
@@ -229,7 +230,7 @@ public static class MainClassF
 	{
 		client?.Close();//отключение клиента
 		netStream?.Close();//отключение потока
-		var tempFilename = (Environment.GetEnvironmentVariable("temp") ?? throw new IOException()) + @"\AresT-" + Environment.ProcessId + ".tmp";
+		var tempFilename = (Environment.GetEnvironmentVariable("temp") ?? throw new IOException()) + @"\Ares-" + Environment.ProcessId + ".tmp";
 		if (File.Exists(tempFilename))
 		{
 			rfs.Close();
@@ -270,19 +271,19 @@ public static class MainClassF
 					i--;
 			}
 			bits.Insert(0, new BitList(6, ProgramVersion));
-			bytes = new byte[(bits.Length + 7) / 8];
+			bytes = GC.AllocateUninitializedArray<byte>((bits.Length + 7) / 8);
 			bits.CopyTo(bytes, 0);
 			wfs.Write(bytes, 0, bytes.Length);
 		}
 		if (fragmentCount > 1)
-			bytes = new byte[FragmentLength];
+			bytes = GC.AllocateUninitializedArray<byte>(FragmentLength);
 		for (; fragmentCount > 0; fragmentCount--)
 		{
 			if (fragmentCount == 1)
 			{
 				var leftLength = (int)(rfs.Length % FragmentLength);
 				if (leftLength != 0)
-					bytes = new byte[leftLength];
+					bytes = GC.AllocateUninitializedArray<byte>(leftLength);
 			}
 			rfs.ReadExactly(bytes);
 			var s = new Executions(bytes).Encode();
@@ -297,12 +298,12 @@ public static class MainClassF
 			wfs.Seek(0, SeekOrigin.Begin);
 			wfs.Write([0]);
 			rfs.Seek(0, SeekOrigin.Begin);
-			var bytes2 = rfs.Length < FragmentLength ? default! : new byte[FragmentLength];
+			var bytes2 = rfs.Length < FragmentLength ? default! : GC.AllocateUninitializedArray<byte>(FragmentLength);
 			for (var i = 0; i < rfs.Length; i += FragmentLength)
 			{
 				var length = (int)Min(rfs.Length - i, FragmentLength);
 				if (length < FragmentLength)
-					bytes2 = new byte[length];
+					bytes2 = GC.AllocateUninitializedArray<byte>(length);
 				rfs.ReadExactly(bytes2);
 				wfs.Write(bytes2);
 			}
@@ -318,12 +319,12 @@ public static class MainClassF
 		var encodingVersion = (byte)(readByte & 63);
 		if (encodingVersion == 0)
 		{
-			var bytes2 = rfs.Length < 2048000000 ? default! : new byte[2048000000];
+			var bytes2 = rfs.Length < 2048000000 ? default! : GC.AllocateUninitializedArray<byte>(2048000000);
 			for (var i = 1; i < rfs.Length; i += 2048000000)
 			{
 				var length = (int)Min(rfs.Length - i, 2048000000);
 				if (length < 2048000000)
-					bytes2 = new byte[length];
+					bytes2 = GC.AllocateUninitializedArray<byte>(length);
 				rfs.ReadExactly(bytes2);
 				wfs.Write(bytes2);
 			}
@@ -341,12 +342,12 @@ public static class MainClassF
 		{
 			if (fragmentCount == 1)
 			{
-				bytes = new byte[(int)Min(rfs.Length - rfs.Position, 2048000002)];
+				bytes = GC.AllocateUninitializedArray<byte>((int)Min(rfs.Length - rfs.Position, 2048000002));
 				rfs.ReadExactly(bytes);
 			}
 			else
 			{
-				bytes = new byte[4];
+				bytes = GC.AllocateUninitializedArray<byte>(4);
 				rfs.ReadExactly(bytes, 0, 3);
 				var fragmentLength = Min(bytes[0] * ValuesIn2Bytes + bytes[1] * ValuesInByte + bytes[2], 2048000002);
 				if (fragmentLength > 16000010)
@@ -354,7 +355,7 @@ public static class MainClassF
 					rfs.ReadExactly(bytes);
 					fragmentLength = Min(bytes[0] * ValuesIn3Bytes + bytes[1] * ValuesIn2Bytes + bytes[2] * ValuesInByte + bytes[3], 2048000002);
 				}
-				bytes = new byte[fragmentLength];
+				bytes = GC.AllocateUninitializedArray<byte>(fragmentLength);
 				rfs.ReadExactly(bytes);
 			}
 			var s = new DecodingF().Decode(bytes, encodingVersion);
@@ -377,12 +378,12 @@ public static class MainClassF
 		if (encodingVersion is 0 or >= ProgramVersion)
 #pragma warning restore CS8794 // Входные данные всегда соответствуют предоставленному шаблону.
 		{
-			var bytes2 = rfs.Length < 2048000000 ? default! : new byte[2048000000];
+			var bytes2 = rfs.Length < 2048000000 ? default! : GC.AllocateUninitializedArray<byte>(2048000000);
 			for (var i = 1; i < rfs.Length; i += 2048000000)
 			{
 				var length = (int)Min(rfs.Length - i, 2048000000);
 				if (length < 2048000000)
-					bytes2 = new byte[length];
+					bytes2 = GC.AllocateUninitializedArray<byte>(length);
 				rfs.ReadExactly(bytes2);
 				wfs.Write(bytes2);
 			}
@@ -400,12 +401,12 @@ public static class MainClassF
 		{
 			if (fragmentCount == 1)
 			{
-				bytes = new byte[(int)Min(rfs.Length - rfs.Position, 2048000002)];
+				bytes = GC.AllocateUninitializedArray<byte>((int)Min(rfs.Length - rfs.Position, 2048000002));
 				rfs.ReadExactly(bytes);
 			}
 			else
 			{
-				bytes = new byte[4];
+				bytes = GC.AllocateUninitializedArray<byte>(4);
 				rfs.ReadExactly(bytes, 0, 3);
 				var fragmentLength = (int)Min((uint)bytes[0] * ValuesIn2Bytes + bytes[1] * ValuesInByte + bytes[2], 2048000002);
 				if (fragmentLength == 0xFFFFFF)
@@ -413,7 +414,7 @@ public static class MainClassF
 					rfs.ReadExactly(bytes);
 					fragmentLength = Min(bytes[0] * ValuesIn3Bytes + bytes[1] * ValuesIn2Bytes + bytes[2] * ValuesInByte + bytes[3], 2048000002);
 				}
-				bytes = new byte[fragmentLength];
+				bytes = GC.AllocateUninitializedArray<byte>(fragmentLength);
 				rfs.ReadExactly(bytes);
 			}
 			var s = new Executions(new DecodingF().Decode(bytes, encodingVersion)).Encode();
@@ -427,12 +428,12 @@ public static class MainClassF
 		{
 			wfs.Seek(0, SeekOrigin.Begin);
 			rfs.Seek(0, SeekOrigin.Begin);
-			var bytes2 = rfs.Length < 2048000000 ? default! : new byte[2048000000];
+			var bytes2 = rfs.Length < 2048000000 ? default! : GC.AllocateUninitializedArray<byte>(2048000000);
 			for (var i = 0; i < rfs.Length; i += 2048000000)
 			{
 				var length = (int)Min(rfs.Length - i, 2048000000);
 				if (length < 2048000000)
-					bytes2 = new byte[length];
+					bytes2 = GC.AllocateUninitializedArray<byte>(length);
 				rfs.ReadExactly(bytes2);
 				wfs.Write(bytes2);
 			}
