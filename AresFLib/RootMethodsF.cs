@@ -1,21 +1,21 @@
 ﻿
 namespace AresFLib;
 
-internal partial class Compression(NList<byte> originalFile, List<ShortIntervalList> input, int tn)
+internal partial class Compression(NList<byte> originalFile, NList<ShortIntervalList> input, int tn)
 {
-	private readonly List<ShortIntervalList> result = [];
+	private readonly NList<ShortIntervalList> result = [];
 
-	internal List<ShortIntervalList> PreEncode(ref int rle, out NList<byte> originalFile2)
+	internal NList<ShortIntervalList> PreEncode(ref int rle, out NList<byte> originalFile2)
 	{
-		List<ShortIntervalList> cdl;
-		NList<byte> string1, string2, cstring;
+		NList<byte> string1 = default!, string2, cstring;
 		Subtotal[tn] = 0;
 		SubtotalMaximum[tn] = ProgressBarStep * 11;
 		cstring = originalFile;
 		Subtotal[tn] += ProgressBarStep;
-		string1 = new RLE(cstring, tn).Encode();
+		var task = Task.Factory.StartNew(() => string1 = new RLE(cstring, tn).Encode());
+		string2 = new RLE(cstring, tn).RLE3(false);
 		Subtotal[tn] += ProgressBarStep;
-		string2 = new RLE(cstring, tn).RLE3();
+		task.Wait();
 		Subtotal[tn] += ProgressBarStep;
 		Current[tn] = 0;
 		Status[tn] = 0;
@@ -30,18 +30,16 @@ internal partial class Compression(NList<byte> originalFile, List<ShortIntervalL
 			cstring = string2;
 		}
 		originalFile2 = cstring;
-		cdl = new ShortIntervalList[originalFile2.Length + 1];
-		cdl[0] = [];
-		var originalFile2_ = originalFile2;
-		Parallel.For(0, originalFile2.Length, i => cdl[i + 1] = ByteIntervals[originalFile2_[i]]);
 		Subtotal[tn] += ProgressBarStep;
-		return cdl;
+		Current[tn] = 0;
+		Status[tn] = 0;
+		return originalFile2.ToNList(x => ByteIntervals[x]).Insert(0, new ShortIntervalList());
 	}
 
-	internal void Encode1(ref byte[] cs, ref int hf)
+	internal void Encode1(ref NList<byte> cs, ref int hf)
 	{
-		byte[] s;
-		List<ShortIntervalList> dl1, cdl = input;
+		NList<byte> s;
+		NList<ShortIntervalList> dl1, cdl = input;
 		Subtotal[tn] = 0;
 		SubtotalMaximum[tn] = ProgressBarStep * 4;
 		Subtotal[tn] += ProgressBarStep;
@@ -49,12 +47,12 @@ internal partial class Compression(NList<byte> originalFile, List<ShortIntervalL
 		Subtotal[tn] += ProgressBarStep;
 		if ((PresentMethodsF & UsedMethodsF.AHF1) != 0)
 		{
-			s = new AdaptiveHuffmanGlobal(tn).Encode(dl1, new());
+			s = new AdaptiveHuffman(tn).Encode(dl1, new());
 			Subtotal[tn] += ProgressBarStep;
 		}
 		else
 		{
-			dl1 = new(new Huffman(dl1, result, tn).Encode());
+			dl1 = new Huffman(dl1, new(dl1), tn).Encode();
 			Subtotal[tn] += ProgressBarStep;
 			s = WorkUpDoubleList(dl1, tn);
 		}
@@ -66,10 +64,10 @@ internal partial class Compression(NList<byte> originalFile, List<ShortIntervalL
 		}
 	}
 
-	internal void Encode2(ref byte[] cs, ref int hf, ref int lz)
+	internal void Encode2(ref NList<byte> cs, ref int hf, ref int lz)
 	{
-		byte[] s;
-		List<ShortIntervalList> dl1, cdl = input;
+		NList<byte> s;
+		NList<ShortIntervalList> dl1, cdl = input;
 		LZData lzData = new();
 		if ((PresentMethodsF & UsedMethodsF.LZ2) != 0)
 		{
@@ -91,7 +89,7 @@ internal partial class Compression(NList<byte> originalFile, List<ShortIntervalL
 			cs = s;
 		}
 		if ((PresentMethodsF & UsedMethodsF.HF2) != 0)
-			s = new AdaptiveHuffmanGlobal(tn).Encode(cdl, lzData);
+			s = new AdaptiveHuffman(tn).Encode(cdl, lzData);
 		Subtotal[tn] += ProgressBarStep;
 		if (s.Length < cs.Length && s.Length > 0)
 		{
@@ -100,9 +98,9 @@ internal partial class Compression(NList<byte> originalFile, List<ShortIntervalL
 		}
 	}
 
-	internal void Encode3(ref byte[] cs, ref int indicator)
+	internal void Encode3(ref NList<byte> cs, ref int indicator)
 	{
-		byte[] s;
+		NList<byte> s;
 		Subtotal[tn] = 0;
 		SubtotalMaximum[tn] = ProgressBarStep * 4;
 		new ArchaicHuffman(tn).Encode(input);
@@ -115,17 +113,18 @@ internal partial class Compression(NList<byte> originalFile, List<ShortIntervalL
 		}
 	}
 
-	internal void Encode4(ref byte[] cs, ref int indicator)
+	internal void Encode4(ref NList<byte> cs, ref int indicator)
 	{
-		byte[] s;
+		NList<byte> s;
 		Subtotal[tn] = 0;
 		SubtotalMaximum[tn] = ProgressBarStep * 2;
 		var ppm = new PPM(tn);
-		var input2 = input.GetSlice(1).SplitIntoEqual(16000000);
+		var input2 = input.GetRange(1).NSplitIntoEqual(16000000);
 		input2[0].Insert(0, input[0]);
 		if (input2.Length > 1)
 			throw new EncoderFallbackException();
 		s = ppm.Encode(input);
+		input2.ForEach(x => x?.Dispose());
 		ppm.Dispose();
 		Subtotal[tn] += ProgressBarStep;
 		if (s.Length < originalFile.Length && s.Length > 0)
@@ -136,17 +135,17 @@ internal partial class Compression(NList<byte> originalFile, List<ShortIntervalL
 	}
 }
 
-public record class Executions(byte[] OriginalFile)
+public record class ExecutionsF(NList<byte> OriginalFile)
 {
-	private readonly byte[][] s = RedStarLinq.FillArray(ProgressBarGroups, _ => OriginalFile);
-	private byte[] cs = OriginalFile;
+	private readonly NList<byte>[] s = RedStarLinq.FillArray(ProgressBarGroups, _ => OriginalFile);
+	private NList<byte> cs = OriginalFile;
 	private int hf = 0, bwt = 0, rle = 0, lz = 0, misc = 0, hfP1 = 0, hfP2 = 0, lzP2 = 0, miscP3 = 0, miscP4 = 0;
 
-	public byte[] Encode()
+	public NList<byte> Encode()
 	{
 		Total = 0;
 		TotalMaximum = ProgressBarStep * 6;
-		var mainInput = new Compression(OriginalFile.ToNList(), [], 0).PreEncode(ref rle, out var originalFile2);
+		using var mainInput = new Compression(OriginalFile.ToNList(), [], 0).PreEncode(ref rle, out var originalFile2);
 		Total += ProgressBarStep;
 		InitThreads(mainInput, originalFile2);
 		ProcessThreads();
@@ -175,14 +174,14 @@ public record class Executions(byte[] OriginalFile)
 		}
 		else
 			return [(byte)rle, .. originalFile2];
-		var compressedFile = new[] { (byte)(misc + lz + bwt + rle + hf) }.Concat(cs).ToArray();
+		var compressedFile = new[] { (byte)(misc + lz + bwt + rle + hf) }.Concat(cs).ToNList();
 #if DEBUG
 		Validate(compressedFile);
 #endif
 		return compressedFile;
 	}
 
-	private void InitThreads(List<ShortIntervalList> mainInput, NList<byte> originalFile2)
+	private void InitThreads(NList<ShortIntervalList> mainInput, NList<byte> originalFile2)
 	{
 		Threads[0] = new Thread(() =>
 		{
@@ -250,11 +249,11 @@ public record class Executions(byte[] OriginalFile)
 	}
 #if DEBUG
 
-	private void Validate(byte[] compressedFile)
+	private void Validate(NList<byte> compressedFile)
 	{
 		try
 		{
-			var decoded = new DecodingF().Decode(compressedFile, ProgramVersion);
+			using var decoded = new DecodingF().Decode(compressedFile, ProgramVersion);
 			for (var i = 0; i < OriginalFile.Length; i++)
 				if (OriginalFile[i] != decoded[i])
 					throw new DecoderFallbackException();

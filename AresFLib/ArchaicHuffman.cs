@@ -3,7 +3,7 @@ namespace AresFLib;
 
 internal record class ArchaicHuffman(int TN)
 {
-	public BitList Encode(List<ShortIntervalList> input)
+	public BitList Encode(NList<ShortIntervalList> input)
 	{
 		var bwtIndex = input[0].IndexOf(BWTApplied);
 		if (CreateVar(input[0].IndexOf(HuffmanApplied), out var huffmanIndex) != -1 && !(bwtIndex != -1 && huffmanIndex == bwtIndex + 1))
@@ -21,9 +21,9 @@ internal record class ArchaicHuffman(int TN)
 		if (input.Length < startPos + lzPos + 1)
 			throw new EncoderFallbackException();
 		var originalBase = input[startPos + lzPos][0].Base;
-		if (!input.GetSlice(startPos + lzPos + 1).All((x, index) => bwtIndex != -1 && (index + lzPos + 1) % (BWTBlockSize + 2) is 0 or 1 || x[0].Base == originalBase))
+		if (!input.GetRange(startPos + lzPos + 1).All((x, index) => bwtIndex != -1 && (index + lzPos + 1) % (BWTBlockSize + 2) is 0 or 1 || x[0].Base == originalBase))
 			throw new EncoderFallbackException();
-		var frequencyTable = input.GetSlice(startPos).FrequencyTable(x => x[0].Lower).NSort(x => ~(uint)x.Count);
+		var frequencyTable = input.GetRange(startPos).FrequencyTable(x => x[0].Lower).NSort(x => ~(uint)x.Count);
 		var nodes = frequencyTable.ToList(x => new ArchaicHuffmanNode(x.Key, x.Count));
 		var maxFrequency = nodes[0].Count;
 		Current[TN] = 0;

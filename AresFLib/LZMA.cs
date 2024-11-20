@@ -4,19 +4,19 @@ internal record class LZMA(int TN)
 {
 	private readonly int threadsCount = Environment.ProcessorCount;
 
-	public byte[] Encode(List<ShortIntervalList> input)
+	public NList<byte> Encode(NList<ShortIntervalList> input)
 	{
-		if (!(input.Length >= 3 && CreateVar(input[1][0].Base, out var originalBase) <= ValuesInByte && input.GetSlice(2).All(x => x[0].Base == originalBase)))
+		if (!(input.Length >= 3 && CreateVar(input[1][0].Base, out var originalBase) <= ValuesInByte && input.GetRange(2).All(x => x[0].Base == originalBase)))
 			throw new EncoderFallbackException();
-		using BitList bitList = new(input.GetSlice(1).ToNList(x => (byte)x[0].Lower));
+		using BitList bitList = new(input.GetRange(1).ToNList(x => (byte)x[0].Lower));
 		return Encode(bitList);
 	}
 
-	public byte[] Encode(BitList bitList)
+	public NList<byte> Encode(BitList bitList)
 	{
 		Current[TN] = 0;
 		CurrentMaximum[TN] = ProgressBarStep * 2;
-		var indexCodes = RedStarLinq.PNFill(bitList.Length - 23, index => bitList.GetSmallRange(index, 24)).PGroup(TN).Filter(X => X.Group.Length >= 2).NSort(x => x.Key).PToArray(col => col.Group.NSort());
+		var indexCodes = RedStarLinq.PNFill(bitList.Length - 23, index => bitList.GetSmallRange(index, 24)).PGroup(TN).Filter(X => X.Group.Length >= 2).NSort(x => x.Key).PToArray(col => col.Group.Sort());
 		var startKGlobal = 24;
 		var repeatsInfo = RedStarLinq.FillArray(threadsCount, _ => new Dictionary<uint, (uint dist, uint length, uint spiralLength)>());
 		Status[TN] = 0;
@@ -29,15 +29,15 @@ internal record class LZMA(int TN)
 		var lockObj = RedStarLinq.FillArray(threadsCount, _ => new object());
 		Parallel.ForEach(indexCodes, x => FindMatchesRecursive(x, 0));
 		var (blockStartValue, blockEscapeValue, bitsCount, blockStartIndexes) = LZMABlockStart(bitList);
-		var blockStart = new BitList(bitsCount, blockStartValue).ToList(x => new ShortIntervalList() { new(x ? 1u : 0, 2) });
+		var blockStart = new BitList(bitsCount, blockStartValue).ToNList(x => new ShortIntervalList() { new(x ? 1u : 0, 2) });
 		var repeatsInfoSum = repeatsInfo.JoinIntoSingle().ToNList();
-		LZRequisites(bitList.Length, BitsPerByte, repeatsInfoSum, out var boundIndex, out var repeatsInfoList2, out var starts, out var dists, out var lengths, out var spiralLengths, out var maxDist, out var maxLength, out var maxSpiralLength, out var rDist, out var thresholdDist, out var rLength, out var thresholdLength, out var rSpiralLength, out var thresholdSpiralLength, PrimitiveType.UIntType);
-		var result = bitList.ToList(x => new ShortIntervalList() { new(x ? 1u : 0, 2) });
+		LZRequisites(bitList.Length, BitsPerByte, repeatsInfoSum, out var boundIndex, out var repeatsInfoList2, out var stats, out var maxDist, out var maxLength, out var maxSpiralLength, out var rDist, out var thresholdDist, out var rLength, out var thresholdLength, out var rSpiralLength, out var thresholdSpiralLength);
+		var result = bitList.ToNList(x => new ShortIntervalList() { new(x ? 1u : 0, 2) });
 		Status[TN] = 0;
-		StatusMaximum[TN] = starts.Length;
+		StatusMaximum[TN] = stats.starts.Length;
 		Current[TN] += ProgressBarStep;
 		BitList elementsReplaced = new(result.Length, false);
-		WriteLZMatches(result, blockStart, useSpiralLengths, starts[..boundIndex], dists, lengths, spiralLengths, maxDist, maxLength, maxSpiralLength, rDist, thresholdDist, rLength, thresholdLength, rSpiralLength, thresholdSpiralLength, elementsReplaced);
+		WriteLZMatches(result, blockStart, useSpiralLengths, stats.starts[..boundIndex], stats.dists, stats.lengths, stats.spiralLengths, maxDist, maxLength, maxSpiralLength, rDist, thresholdDist, rLength, thresholdLength, rSpiralLength, thresholdSpiralLength, elementsReplaced);
 		var sortedRepeatsInfo2 = repeatsInfoList2.PConvert(l => l.PNBreak(x => x.Key, x => (x.Value.dist, x.Value.length, x.Value.spiralLength)));
 		repeatsInfoList2.ForEach(x => x.Dispose());
 		repeatsInfoList2.Dispose();
@@ -78,7 +78,7 @@ internal record class LZMA(int TN)
 		c.Add(new Interval((uint)rLength, 3));
 		c.WriteCount(maxLength, 24);
 		if (rLength != 0)
-			c.Add(new(thresholdLength, maxLength + 1));
+			c.Add(new(thresholdLength, maxLength + 1u));
 		if (maxDist == 0 && maxLength == 0)
 			c.Add(new(1, 2));
 		c.Add(new Interval(useSpiralLengths, 2));
@@ -87,7 +87,7 @@ internal record class LZMA(int TN)
 			c.Add(new Interval((uint)rSpiralLength, 3));
 			c.WriteCount(maxSpiralLength, 16);
 			if (rSpiralLength != 0)
-				c.Add(new(thresholdSpiralLength, maxSpiralLength + 1));
+				c.Add(new(thresholdSpiralLength, maxSpiralLength + 1u));
 		}
 		var cSplit = c.SplitIntoEqual(8).Convert(x => new ShortIntervalList(x));
 		c.Dispose();
@@ -96,27 +96,28 @@ internal record class LZMA(int TN)
 		if (!new AdaptiveHuffmanBits(TN).Encode(ar, result, cSplit.Length))
 			throw new EncoderFallbackException();
 		cSplit.Dispose();
+		result.Dispose();
 		return ar;
-		void FindMatchesRecursive(uint[] ic, int level)
+		void FindMatchesRecursive(NList<uint> ic, int level)
 		{
 			if (level < maxLevel)
 			{
-				var nextCodes = ic.GetSlice(..Max(ic.FindLastIndex(x => x <= bitList.Length - level * BitsPerByte - startKGlobal), 0)).GroupIndexes(iIC => bitList.GetSmallRange((int)iIC + startKGlobal, BitsPerByte)).FilterInPlace(x => x.Length >= 2).Convert(x => x.ToArray(index => ic[index]).NSort());
+				var nextCodes = ic.GetSlice(..Max(ic.FindLastIndex(x => x <= bitList.Length - level * BitsPerByte - startKGlobal), 0)).GroupIndexes(iIC => bitList.GetSmallRange((int)iIC + startKGlobal, BitsPerByte)).FilterInPlace(x => x.Length >= 2).Convert(x => x.ToNList(index => ic[index]).Sort());
 				var nextCodes2 = nextCodes.JoinIntoSingle().ToHashSet();
-				ic = ic.Filter(x => !nextCodes2.Contains(x)).ToArray();
+				ic = ic.Filter(x => !nextCodes2.Contains(x));
 				nextCodes.ForEach(x => FindMatchesRecursive(x, level + 1));
 			}
 			if (ic.Length > 1)
 				FindMatches(ic, level * BitsPerByte + startKGlobal);
 		}
-		void FindMatches(uint[] ic, int startK)
+		void FindMatches(NList<uint> ic, int startK)
 		{
 			for (var i = 1; i < ic.Length; i++, Status[TN]++)
 			{
 				var iIC = (int)ic[i];
 				if (maxReached.Length != 0 && Lock(lockObj, () => CreateVar(maxReached.IndexOfNotLess(iIC), out var mr) >= 1 && maxReachedLengths[maxReached[mr - 1]] > iIC - maxReached[mr - 1]))
 					continue;
-				var matches = ic.GetSlice((Array.FindLastIndex(ic, i - 1, x => iIC - x >= LZDictionarySize * BitsPerByte) + 1)..i).Filter(jIC => iIC - jIC >= 2 && RedStarLinq.Equals(bitList.GetRange(iIC, startK), bitList.GetRange((int)jIC, startK))).ToNList();
+				var matches = ic.GetSlice((ic.FindLastIndex(i - 1, x => iIC - x >= LZDictionarySize * BitsPerByte) + 1)..i).Filter(jIC => iIC - jIC >= 2 && RedStarLinq.Equals(bitList.GetRange(iIC, startK), bitList.GetRange((int)jIC, startK))).ToNList();
 				var ub = bitList.Length - iIC - 1;
 				if (matches.Length == 0 || ub < startK)
 					continue;
@@ -137,7 +138,7 @@ internal record class LZMA(int TN)
 				if (k * Log(2) < Log(21) + Log(LZDictionarySize * BitsPerByte) + Log(k))
 					continue;
 				var sl = (ushort)Clamp(k / (iIC - lastMatch) - 1, 0, ushort.MaxValue);
-				UpdateRepeatsInfo(repeatsInfo, lockObj, threadsCount, iIC, (uint)Max(iIC - lastMatch - k, 0), (uint)Min(k - 2, iIC - lastMatch - 2), sl, PrimitiveType.UIntType);
+				UpdateRepeatsInfo(repeatsInfo, lockObj, new((uint)iIC, ((uint)Max(iIC - lastMatch - k, 0), (uint)Min(k - 2, iIC - lastMatch - 2), sl)));
 				if (sl > 0)
 					useSpiralLengths = 1;
 				if (k > ub || sl == ushort.MaxValue)
@@ -161,7 +162,7 @@ internal record class LZMA(int TN)
 		return ((uint)CreateVar(groups.FindMin(x => x.Length)!.Key, out var value), (uint)groups.FilterInPlace(x => x.Key != value).FindMin(x => x.Length)!.Key, BitsPerByte, ranges.IndexesOf(value));
 	}
 
-	private void WriteLZMatches(List<ShortIntervalList> result, List<ShortIntervalList> blockStart, uint useSpiralLengths, NList<uint> starts, NList<uint> dists, NList<uint> lengths, NList<uint> spiralLengths, uint maxDist, uint maxLength, uint maxSpiralLength, int rDist, uint thresholdDist, int rLength, uint thresholdLength, int rSpiralLength, uint thresholdSpiralLength, BitList elementsReplaced, bool changeBase = true)
+	private void WriteLZMatches(NList<ShortIntervalList> result, NList<ShortIntervalList> blockStart, uint useSpiralLengths, NList<uint> starts, NList<uint> dists, NList<uint> lengths, NList<uint> spiralLengths, uint maxDist, uint maxLength, uint maxSpiralLength, int rDist, uint thresholdDist, int rLength, uint thresholdLength, int rSpiralLength, uint thresholdSpiralLength, BitList elementsReplaced, bool changeBase = true)
 	{
 		double statesNumLog1, statesNumLog2;
 		for (var i = 0; i < starts.Length; i++, Status[TN]++)

@@ -42,40 +42,54 @@ public static class Global
 	public static UsedMethodsF PresentMethodsF { get; set; } = UsedMethodsF.CS1 | UsedMethodsF.AHF1;
 }
 
-public class DecodingF
+public class DecodingF : IDisposable
 {
 	protected GlobalDecoding globalDecoding = default!;
 	protected ArithmeticDecoder ar = default!;
 	protected int misc, hf, rle, lz, bwt, n;
 
-	public virtual byte[] Decode(byte[] compressedFile, byte encodingVersion)
+	public void Dispose()
+	{
+		ar?.Dispose();
+		GC.SuppressFinalize(this);
+	}
+
+	public virtual NList<byte> Decode(NList<byte> compressedFile, byte encodingVersion)
 	{
 		if (compressedFile.Length <= 2)
 			return [];
 		if (encodingVersion == 0)
-			return compressedFile;
+			return [.. compressedFile];
 		else if (encodingVersion < ProgramVersion)
 			return encodingVersion switch
 			{
 				_ => throw new DecoderFallbackException(),
 			};
-		if (ProcessMethod(compressedFile) is byte[] bytes)
+		if (ProcessMethod(compressedFile) is NList<byte> bytes)
 			return bytes;
 		var byteList = ProcessMisc(compressedFile);
 		Current[0] += ProgressBarStep;
 		if (rle == 12)
+		{
+			var oldByteList = byteList;
 			byteList = new RLEDec(byteList).DecodeRLE3();
+			oldByteList.Dispose();
+		}
 		Current[0] += ProgressBarStep;
 		if (rle == 6)
+		{
+			var oldByteList = byteList;
 			byteList = new RLEDec(byteList).Decode();
-		return [.. byteList];
+			oldByteList.Dispose();
+		}
+		return byteList;
 	}
 
-	protected virtual byte[]? ProcessMethod(byte[] compressedFile)
+	protected virtual NList<byte>? ProcessMethod(NList<byte> compressedFile)
 	{
 		int method = compressedFile[0];
 		if (method == 0)
-			return compressedFile[1..];
+			return compressedFile.ToNList()[1..];
 		else if (compressedFile.Length <= 2)
 			throw new DecoderFallbackException();
 		SplitMethod(method);
@@ -84,21 +98,22 @@ public class DecodingF
 		return null;
 	}
 
-	protected virtual NList<byte> ProcessMisc(byte[] compressedFile) => misc switch
+	protected virtual NList<byte> ProcessMisc(NList<byte> compressedFile) => misc switch
 	{
 		1 => ProcessMisc1(compressedFile),
 		-1 => ProcessNonMisc(compressedFile),
 		_ => throw new DecoderFallbackException(),
 	};
 
-	protected virtual NList<byte> ProcessMisc1(byte[] compressedFile)
+	protected virtual NList<byte> ProcessMisc1(NList<byte> compressedFile)
 	{
 		ar = compressedFile[1..];
 		globalDecoding = CreateGlobalDecoding();
-		return globalDecoding.CreatePPM(ValuesInByte).Decode().PNConvert(x => (byte)x[0].Lower);
+		using var ppm = globalDecoding.CreatePPM(ValuesInByte);
+		return ppm.Decode().PNConvert(x => (byte)x[0].Lower);
 	}
 
-	protected virtual NList<byte> ProcessNonMisc(byte[] compressedFile)
+	protected virtual NList<byte> ProcessNonMisc(NList<byte> compressedFile)
 	{
 		if (hf + lz + bwt != 0)
 		{
@@ -106,10 +121,11 @@ public class DecodingF
 			CurrentMaximum[0] = ProgressBarStep * (bwt != 0 ? 4 : 3);
 			ar = compressedFile[1..];
 			globalDecoding = CreateGlobalDecoding();
-			return CreateDecoding2().Decode().PNConvert(x => (byte)x[0].Lower);
+			using var dec = CreateDecoding2();
+			return dec.Decode().PNConvert(x => (byte)x[0].Lower);
 		}
 		else
-			return compressedFile.GetSlice(1).ToNList();
+			return compressedFile.GetRange(1);
 	}
 
 	protected virtual void SplitMethod(int method)
@@ -121,12 +137,12 @@ public class DecodingF
 		bwt = method % 18 % 6 / 4;
 	}
 
-	public virtual List<ShortIntervalList> ReadCompressedList(HuffmanData huffmanData, int bwt, LZData lzData, int lz, int counter)
+	public virtual NList<ShortIntervalList> ReadCompressedList(HuffmanData huffmanData, int bwt, LZData lzData, int lz, int counter)
 	{
 		var decoding = CreateGlobalDecoding();
 		Status[0] = 0;
 		StatusMaximum[0] = counter;
-		List<ShortIntervalList> result = [];
+		NList<ShortIntervalList> result = [];
 		var startingArithmeticMap = lz == 0 ? huffmanData.ArithmeticMap : huffmanData.ArithmeticMap[..^1];
 		var uniqueLists = huffmanData.UniqueList.ToList(x => new ShortIntervalList() { x });
 		for (; counter > 0; counter--, Status[0]++)
@@ -141,8 +157,7 @@ public class DecodingF
 			if (length > result.Length - 2)
 				throw new DecoderFallbackException();
 			decoding.ProcessLZDist(lzData, result.Length, out var dist, length, out var maxDist);
-			if (decoding.ProcessLZSpiralLength(lzData, ref dist, out var spiralLength, maxDist))
-				dist = 0;
+			decoding.ProcessLZSpiralLength(lzData, ref dist, out var spiralLength, maxDist);
 			var start = (int)(result.Length - dist - length - 2);
 			if (start < 0)
 				throw new DecoderFallbackException();
@@ -160,77 +175,82 @@ public class DecodingF
 
 	protected virtual Decoding2F CreateDecoding2() => new(this, ar, hf, bwt, lz);
 
-	public virtual List<ShortIntervalList> DecodeBWT(List<ShortIntervalList> input, NList<byte> skipped)
+	public virtual NList<ShortIntervalList> DecodeBWT(NList<ShortIntervalList> input, NList<byte> skipped, int bwtBlockSize)
 	{
+		var bwtBlockExtraSize = bwtBlockSize <= 0x4000 ? 2 : bwtBlockSize <= 0x400000 ? 3 : bwtBlockSize <= 0x40000000 ? 4 : 5;
 		Status[0] = 0;
-		StatusMaximum[0] = GetArrayLength(input.Length, BWTBlockSize + BWTBlockExtraSize);
-		var bytes = input.Convert(x => (byte)x[0].Lower);
-		NList<byte> bytes2 = [];
-		for (var i = 0; i < bytes.Length;)
+		StatusMaximum[0] = GetArrayLength(input.Length, bwtBlockSize + bwtBlockExtraSize);
+		var numericInput = input.Convert(x => (short)x[0].Lower);
+		NList<byte> bytes2 = new(numericInput.Length * 3);
+		for (var i = 0; i < numericInput.Length;)
 		{
-			var zle = bytes[i] & ValuesInByte >> 1;
-			bytes2.AddRange(bytes.GetSlice(i..(i += BWTBlockExtraSize)));
-			bytes2.AddRange(zle != 0 ? DecodeZLE(bytes, ref i) : bytes.GetRange(i..Min(i += BWTBlockSize, bytes.Length)));
+			var zle = numericInput[i] & ValuesInByte >> 1;
+			bytes2.AddRange(numericInput.GetSlice(i..(i += bwtBlockExtraSize)).Convert(x => (byte)x));
+			bytes2.AddRange(zle != 0 ? DecodeZLE(numericInput, ref i, bwtBlockSize) : numericInput.GetRange(i..Min(i += bwtBlockSize, numericInput.Length)).Convert(x => (byte)x));
 		}
-		var hs = bytes2.Filter((x, index) => index % (BWTBlockSize + BWTBlockExtraSize) >= BWTBlockExtraSize).ToHashSet().Concat(skipped).Sort().ToHashSet();
-		List<ShortIntervalList> result = new(bytes2.Length);
-		for (var i = 0; i < bytes2.Length; i += BWTBlockSize, Status[0]++)
+		var hs = bytes2.Filter((x, index) => index % (bwtBlockSize + bwtBlockExtraSize) >= bwtBlockExtraSize).ToHashSet().Concat(skipped).Sort().ToHashSet();
+		NList<byte> result = new(bytes2.Length);
+		for (var i = 0; i < bytes2.Length; i += bwtBlockSize, Status[0]++)
 		{
-			if (bytes2.Length - i <= BWTBlockExtraSize)
+			if (bytes2.Length - i <= bwtBlockExtraSize)
 				throw new DecoderFallbackException();
-			var length = Min(BWTBlockSize, bytes2.Length - i - BWTBlockExtraSize);
+			var length = Min(bwtBlockSize, bytes2.Length - i - bwtBlockExtraSize);
 			bytes2[i] &= (ValuesInByte >> 1) - 1;
-			var firstPermutation = (int)bytes2.GetSlice(i, BWTBlockExtraSize).Progression(0L, (x, y) => unchecked((x << BitsPerByte) + y));
-			i += BWTBlockExtraSize;
+			var firstPermutation = (int)bytes2.GetSlice(i, bwtBlockExtraSize).Progression(0L, (x, y) => unchecked((x << BitsPerByte) + y));
+			i += bwtBlockExtraSize;
 			result.AddRange(DecodeBWT2(bytes2.GetRange(i, length), hs, firstPermutation));
 		}
-		return result;
+		bytes2.Dispose();
+		return result.ToNList(x => ByteIntervals[x]);
 	}
 
-	protected virtual List<ShortIntervalList> DecodeBWT2(NList<byte> input, ListHashSet<byte> hs, int firstPermutation)
+	protected virtual NList<byte> DecodeBWT2(NList<byte> input, ListHashSet<byte> hs, int firstPermutation)
 	{
-		var mtfMemory = hs.ToArray();
+		var mtfMemory = hs.ToNList();
 		for (var i = 0; i < input.Length; i++)
 		{
 			var index = hs.IndexOf(input[i]);
 			input[i] = mtfMemory[index];
-			Array.Copy(mtfMemory, 0, mtfMemory, 1, index);
+			mtfMemory.SetRange(1, mtfMemory[..index]);
 			mtfMemory[0] = input[i];
 		}
-		var sorted = input.ToArray((elem, index) => (elem, index)).NSort(x => x.elem);
-		var convert = sorted.ToArray(x => x.index);
-		var result = RedStarLinq.EmptyList<ShortIntervalList>(input.Length);
+		mtfMemory.Dispose();
+		var sorted = input.ToNList((elem, index) => (elem, index)).Sort(x => x.elem);
+		var convert = sorted.ToNList(x => x.index);
+		sorted.Dispose();
+		var result = RedStarLinq.NEmptyList<byte>(input.Length);
 		var it = firstPermutation;
 		for (var i = 0; i < input.Length; i++)
 		{
 			it = convert[it];
-			result[i] = [new(input[it], ValuesInByte)];
+			result[i] = input[it];
 		}
+		convert.Dispose();
 		return result;
 	}
 
-	public virtual NList<byte> DecodeZLE(Slice<byte> byteList, ref int i)
+	public virtual NList<byte> DecodeZLE(Slice<short> byteList, ref int i, int bwtBlockSize)
 	{
 		if (i >= byteList.Length)
 			throw new DecoderFallbackException();
-		byte zero = byteList[i++], zeroB = byteList[i++];
-		NList<byte> result = [];
+		short zero = byteList[i++], zeroB = byteList[i++];
+		NList<byte> result = new(bwtBlockSize);
 		String zeroCode = ['1'];
 		int length;
-		for (; i < byteList.Length && result.Length < BWTBlockSize;)
+		for (; i < byteList.Length && result.Length < bwtBlockSize;)
 		{
-			while (i < byteList.Length && result.Length < BWTBlockSize && byteList[i] != zero && byteList[i] != zeroB)
-				result.Add(byteList[i++]);
-			if (i >= byteList.Length || result.Length >= BWTBlockSize)
+			while (i < byteList.Length && result.Length < bwtBlockSize && byteList[i] != zero && byteList[i] != zeroB)
+				result.Add((byte)byteList[i++]);
+			if (i >= byteList.Length || result.Length >= bwtBlockSize)
 				break;
 			zeroCode.Remove(1);
 			length = 0;
-			while (i < byteList.Length && result.Length + length < BWTBlockSize && (byteList[i] == zero || byteList[i] == zeroB))
+			while (i < byteList.Length && result.Length + length < bwtBlockSize && (byteList[i] == zero || byteList[i] == zeroB))
 			{
 				zeroCode.Add(byteList[i++] == zero ? '0' : '1');
 				length = (int)(new MpzT(zeroCode.ToString(), 2) - 1);
 			}
-			using var streamOfZeros = RedStarLinq.NFill(zero, length);
+			using var streamOfZeros = RedStarLinq.NFill((byte)zero, length);
 			result.AddRange(streamOfZeros);
 		}
 		return result;

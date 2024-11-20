@@ -10,8 +10,6 @@ public static class MainClassF
 	private static byte[] toSend = [];
 	private static Thread thread = new(() => { });
 	private static readonly int[] FibonacciSequence = [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987, 1597, 2584, 4181, 6765, 10946, 17711, 28657, 46368, 75025, 121393, 196418, 317811, 514229, 832040, 1346269, 2178309, 3524578, 5702887, 9227465, 14930352, 24157817, 39088169, 63245986, 102334155, 165580141, 267914296, 433494437, 701408733, 1134903170, 1836311903];
-	private static FileStream rfs = default!;
-	private static FileStream wfs = default!;
 	private static int fragmentCount;
 	private static readonly bool continue_ = true;
 	private static bool isWorking;
@@ -109,16 +107,17 @@ public static class MainClassF
 			else if (message[0] == 1)
 			{
 				FragmentLength = 1000000 << Min(BitConverter.ToInt32(message.AsSpan(1..)) & 0xF, 11);
-				BWTBlockSize = new[] { 25000, 50000, 100000, 200000, 500000, 1000000 }[Min((BitConverter.ToInt32(message.AsSpan(1..)) & 0x70) >> 4, 5)];
+				BWTBlockSize = new[] { 50000, 100000, 200000, 500000, 1000000, 2000000, 4000000, 16000000 }[Min((BitConverter.ToInt32(message.AsSpan(1..)) & 0x70) >> 4, 7)];
+				LZDictionarySize = new uint[] { 32767, 262143, 1048575, 4194303, 16777215, (1 << 26) - 1, (1 << 28) - 1, 2048000000 }[Min((BitConverter.ToInt32(message.AsSpan(1..)) & 0x380) >> 7, 7)];
 			}
 			else if (message[0] <= 4)
 			{
 				var filename = Encoding.UTF8.GetString(message[1..]);
 				thread = new((message[0] - 2) switch
 				{
-					0 => () => MainThread(filename, (Environment.GetEnvironmentVariable("temp") ?? throw new IOException()) + @"\" + Path.GetFileNameWithoutExtension(filename), Decompress),
+					0 => () => MainThread(filename, (Environment.GetEnvironmentVariable("temp") ?? throw new IOException()) + "/" + Path.GetFileNameWithoutExtension(filename), Decompress),
 					1 => () => MainThread(filename, filename + ".ares-f", Compress),
-					2 => () => MainThread(filename, Path.GetDirectoryName(filename) + @"\" + Path.GetFileNameWithoutExtension(filename), Decompress),
+					2 => () => MainThread(filename, Path.GetDirectoryName(filename) + "/" + Path.GetFileNameWithoutExtension(filename), Decompress),
 					3 => () => MainThread(filename, filename, Recompress),
 					_ => throw new NotImplementedException(),
 				})
@@ -141,15 +140,14 @@ public static class MainClassF
 
 	public static void MainThread(string filename, string filename2, Action<FileStream, FileStream> action, bool send = true)
 	{
+		FileStream? rfs = null, wfs = null;
 		var tempFilename = "";
 		try
 		{
 			Supertotal = 0;
 			isWorking = true;
-			if (action == Compress)
-				fragmentCount = (int)Min((new FileInfo(filename).Length + FragmentLength - 1) / FragmentLength, int.MaxValue / 10);
 			rfs = File.OpenRead(filename);
-			tempFilename = (Environment.GetEnvironmentVariable("temp") ?? throw new IOException()) + @"\Ares-" + Environment.ProcessId + ".tmp";
+			tempFilename = (Environment.GetEnvironmentVariable("temp") ?? throw new IOException()) + "/Ares-" + Environment.ProcessId + ".tmp";
 			wfs = File.Open(tempFilename, FileMode.Create);
 			action(rfs, wfs);
 			rfs.Close();
@@ -191,8 +189,8 @@ public static class MainClassF
 		{
 			if (File.Exists(tempFilename))
 			{
-				rfs.Close();
-				wfs.Close();
+				rfs?.Close();
+				wfs?.Close();
 				File.Delete(tempFilename);
 			}
 		}
@@ -230,19 +228,17 @@ public static class MainClassF
 	{
 		client?.Close();//отключение клиента
 		netStream?.Close();//отключение потока
-		var tempFilename = (Environment.GetEnvironmentVariable("temp") ?? throw new IOException()) + @"\Ares-" + Environment.ProcessId + ".tmp";
+		var tempFilename = (Environment.GetEnvironmentVariable("temp") ?? throw new IOException()) + "/Ares-" + Environment.ProcessId + ".tmp";
 		if (File.Exists(tempFilename))
-		{
-			rfs.Close();
-			wfs.Close();
 			File.Delete(tempFilename);
-		}
 		Environment.Exit(0); //завершение процесса
 	}
 
-	public static void Compress(FileStream rfs, FileStream wfs)
+	public static void Compress(Stream rfs, Stream wfs)
 	{
-		var bytes = Array.Empty<byte>();
+		var oldPos = rfs.Position;
+		fragmentCount = (int)Min((rfs.Length - oldPos + FragmentLength - 1) / FragmentLength, int.MaxValue / 10);
+		using NList<byte> bytes = [];
 		if (continue_ && fragmentCount != 0)
 		{
 			Supertotal = 0;
@@ -271,47 +267,54 @@ public static class MainClassF
 					i--;
 			}
 			bits.Insert(0, new BitList(6, ProgramVersion));
-			bytes = GC.AllocateUninitializedArray<byte>((bits.Length + 7) / 8);
-			bits.CopyTo(bytes, 0);
-			wfs.Write(bytes, 0, bytes.Length);
+			var sizeBytes = GC.AllocateUninitializedArray<byte>((bits.Length + 7) / 8);
+			bits.CopyTo(sizeBytes, 0);
+			wfs.Write(sizeBytes);
 		}
 		if (fragmentCount > 1)
-			bytes = GC.AllocateUninitializedArray<byte>(FragmentLength);
+			bytes.Resize(FragmentLength);
 		for (; fragmentCount > 0; fragmentCount--)
 		{
 			if (fragmentCount == 1)
 			{
-				var leftLength = (int)(rfs.Length % FragmentLength);
+				var leftLength = (int)((rfs.Length - oldPos) % FragmentLength);
 				if (leftLength != 0)
-					bytes = GC.AllocateUninitializedArray<byte>(leftLength);
+					bytes.Resize(leftLength);
 			}
-			rfs.ReadExactly(bytes);
-			var s = new Executions(bytes).Encode();
+			rfs.ReadExactly(bytes.AsSpan());
+			var s = new ExecutionsF(bytes).Encode();
 			if (fragmentCount != 1)
-				wfs.Write([(byte)(s.Length >> (BitsPerByte << 1)), unchecked((byte)(s.Length >> BitsPerByte)), unchecked((byte)s.Length)], 0, 3);
-			wfs.Write(s, 0, s.Length);
+			{
+				wfs.Write(s.Length < 16000000 ? [(byte)(s.Length >> (BitsPerByte << 1)),
+					unchecked((byte)(s.Length >> BitsPerByte)), unchecked((byte)s.Length)]
+					: [255, 255, 255, (byte)(s.Length >> BitsPerByte * 3), unchecked((byte)(s.Length >> (BitsPerByte << 1))),
+					unchecked((byte)(s.Length >> BitsPerByte)), unchecked((byte)s.Length)]);
+			}
+			wfs.Write(s.AsSpan());
+			s.Dispose();
 			Supertotal += ProgressBarStep;
 			GC.Collect();
 		}
-		if (wfs.Position >= rfs.Length)
+		if (wfs.Position >= rfs.Length - oldPos)
 		{
 			wfs.Seek(0, SeekOrigin.Begin);
 			wfs.Write([0]);
-			rfs.Seek(0, SeekOrigin.Begin);
-			var bytes2 = rfs.Length < FragmentLength ? default! : GC.AllocateUninitializedArray<byte>(FragmentLength);
-			for (var i = 0; i < rfs.Length; i += FragmentLength)
+			rfs.Seek(oldPos, SeekOrigin.Begin);
+			if (rfs.Length - oldPos >= FragmentLength)
+				bytes.Resize(FragmentLength);
+			for (var i = 0; i < rfs.Length - oldPos; i += FragmentLength)
 			{
-				var length = (int)Min(rfs.Length - i, FragmentLength);
+				var length = (int)Min(rfs.Length - oldPos - i, FragmentLength);
 				if (length < FragmentLength)
-					bytes2 = GC.AllocateUninitializedArray<byte>(length);
-				rfs.ReadExactly(bytes2);
-				wfs.Write(bytes2);
+					bytes.Resize(length);
+				rfs.ReadExactly(bytes.AsSpan());
+				wfs.Write(bytes.AsSpan());
 			}
 			wfs.SetLength(wfs.Position);
 		}
 	}
 
-	public static void Decompress(FileStream rfs, FileStream wfs)
+	public static void Decompress(Stream rfs, Stream wfs)
 	{
 		PreservedFragmentLength = FragmentLength;
 		FragmentLength = 2048000000;
@@ -337,36 +340,36 @@ public static class MainClassF
 			DecodeFibonacci(rfs, readByte);
 			SupertotalMaximum = fragmentCount * 10;
 		}
-		byte[] bytes;
+		using NList<byte> bytes = [], sizeBytes = RedStarLinq.NEmptyList<byte>(4);
 		for (; fragmentCount > 0; fragmentCount--)
 		{
 			if (fragmentCount == 1)
 			{
-				bytes = GC.AllocateUninitializedArray<byte>((int)Min(rfs.Length - rfs.Position, 2048000002));
-				rfs.ReadExactly(bytes);
+				bytes.Resize((int)Min(rfs.Length - rfs.Position, 2048000002));
+				rfs.ReadExactly(bytes.AsSpan());
 			}
 			else
 			{
-				bytes = GC.AllocateUninitializedArray<byte>(4);
-				rfs.ReadExactly(bytes, 0, 3);
-				var fragmentLength = Min(bytes[0] * ValuesIn2Bytes + bytes[1] * ValuesInByte + bytes[2], 2048000002);
+				rfs.ReadExactly(sizeBytes.AsSpan(0, 3));
+				var fragmentLength = Min(sizeBytes[0] * ValuesIn2Bytes + sizeBytes[1] * ValuesInByte + sizeBytes[2], 2048000002);
 				if (fragmentLength > 16000010)
 				{
-					rfs.ReadExactly(bytes);
-					fragmentLength = Min(bytes[0] * ValuesIn3Bytes + bytes[1] * ValuesIn2Bytes + bytes[2] * ValuesInByte + bytes[3], 2048000002);
+					rfs.ReadExactly(sizeBytes.AsSpan());
+					fragmentLength = Min(sizeBytes[0] * ValuesIn3Bytes + sizeBytes[1] * ValuesIn2Bytes + sizeBytes[2] * ValuesInByte + sizeBytes[3], 2048000002);
 				}
-				bytes = GC.AllocateUninitializedArray<byte>(fragmentLength);
-				rfs.ReadExactly(bytes);
+				bytes.Resize(fragmentLength);
+				rfs.ReadExactly(bytes.AsSpan());
 			}
 			var s = new DecodingF().Decode(bytes, encodingVersion);
-			wfs.Write(s, 0, s.Length);
+			wfs.Write(s.AsSpan());
+			s.Dispose();
 			Supertotal += ProgressBarStep;
 			GC.Collect();
 		}
 		FragmentLength = PreservedFragmentLength;
 	}
 
-	private static void Recompress(FileStream rfs, FileStream wfs)
+	private static void Recompress(Stream rfs, Stream wfs)
 	{
 		PreservedFragmentLength = FragmentLength;
 		FragmentLength = 2048000000;
@@ -396,31 +399,31 @@ public static class MainClassF
 			DecodeFibonacci(rfs, readByte);
 			SupertotalMaximum = fragmentCount * 10;
 		}
-		byte[] bytes;
+		using NList<byte> bytes = [], sizeBytes = RedStarLinq.NEmptyList<byte>(4);
 		for (; fragmentCount > 0; fragmentCount--)
 		{
 			if (fragmentCount == 1)
 			{
-				bytes = GC.AllocateUninitializedArray<byte>((int)Min(rfs.Length - rfs.Position, 2048000002));
-				rfs.ReadExactly(bytes);
+				bytes.Resize((int)Min(rfs.Length - rfs.Position, 2048000002));
+				rfs.ReadExactly(bytes.AsSpan());
 			}
 			else
 			{
-				bytes = GC.AllocateUninitializedArray<byte>(4);
-				rfs.ReadExactly(bytes, 0, 3);
-				var fragmentLength = (int)Min((uint)bytes[0] * ValuesIn2Bytes + bytes[1] * ValuesInByte + bytes[2], 2048000002);
-				if (fragmentLength == 0xFFFFFF)
+				rfs.ReadExactly(sizeBytes.AsSpan(0, 3));
+				var fragmentLength = Min(sizeBytes[0] * ValuesIn2Bytes + sizeBytes[1] * ValuesInByte + sizeBytes[2], 2048000002);
+				if (fragmentLength > 16000010)
 				{
-					rfs.ReadExactly(bytes);
-					fragmentLength = Min(bytes[0] * ValuesIn3Bytes + bytes[1] * ValuesIn2Bytes + bytes[2] * ValuesInByte + bytes[3], 2048000002);
+					rfs.ReadExactly(sizeBytes.AsSpan());
+					fragmentLength = Min(sizeBytes[0] * ValuesIn3Bytes + sizeBytes[1] * ValuesIn2Bytes + sizeBytes[2] * ValuesInByte + sizeBytes[3], 2048000002);
 				}
-				bytes = GC.AllocateUninitializedArray<byte>(fragmentLength);
-				rfs.ReadExactly(bytes);
+				bytes.Resize(fragmentLength);
+				rfs.ReadExactly(bytes.AsSpan());
 			}
-			var s = new Executions(new DecodingF().Decode(bytes, encodingVersion)).Encode();
+			var s = new ExecutionsF(new DecodingF().Decode(bytes, encodingVersion)).Encode();
 			if (fragmentCount != 1)
-				wfs.Write([(byte)(s.Length >> (BitsPerByte << 1)), unchecked((byte)(s.Length >> BitsPerByte)), unchecked((byte)s.Length)], 0, 3);
-			wfs.Write(s, 0, s.Length);
+				wfs.Write([(byte)(s.Length >> (BitsPerByte << 1)), unchecked((byte)(s.Length >> BitsPerByte)), unchecked((byte)s.Length)]);
+			wfs.Write(s.AsSpan());
+			s.Dispose();
 			Supertotal += ProgressBarStep;
 			GC.Collect();
 		}
@@ -442,7 +445,7 @@ public static class MainClassF
 		FragmentLength = PreservedFragmentLength;
 	}
 
-	private static void DecodeFibonacci(FileStream rfs, byte readByte)
+	private static void DecodeFibonacci(Stream rfs, byte readByte)
 	{
 		BitList bits;
 		bool one = false, success = false;

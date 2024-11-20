@@ -1,11 +1,11 @@
 ﻿
 namespace AresFLib;
 
-public class Decoding2F
+public class Decoding2F : IDisposable
 {
 	protected DecodingF decoding = default!;
 	protected ArithmeticDecoder ar = default!;
-	protected int maxFrequency, frequencyCount, hf, bwt, lz, counter;
+	protected int maxFrequency, frequencyCount, hf, bwt, lz, counter, bwtBlockSize;
 	protected uint lzRDist, lzMaxDist, lzThresholdDist, lzRLength, lzMaxLength, lzThresholdLength, lzUseSpiralLengths, lzRSpiralLength, lzMaxSpiralLength, lzThresholdSpiralLength;
 	protected MethodDataUnit lzDist = new(), lzLength = new(), lzSpiralLength = new();
 	protected LZData lzData = default!;
@@ -21,6 +21,14 @@ public class Decoding2F
 		this.bwt = bwt;
 		this.lz = lz;
 		counter = (int)ar.ReadCount() - 1;
+		if (bwt != 0)
+		{
+			bwtBlockSize = (int)ar.ReadEqual(18);
+			if (bwtBlockSize < 5)
+				bwtBlockSize = 12500 << bwtBlockSize;
+			else
+				bwtBlockSize = 500000 << (bwtBlockSize - 5);
+		}
 		lzDist = new();
 		lzLength = new();
 		lzSpiralLength = new();
@@ -31,7 +39,15 @@ public class Decoding2F
 		skipped = [];
 	}
 
-	public virtual List<ShortIntervalList> Decode()
+	public void Dispose()
+	{
+		arithmeticMap?.Dispose();
+		uniqueList?.Dispose();
+		skipped?.Dispose();
+		GC.SuppressFinalize(this);
+	}
+
+	public virtual NList<ShortIntervalList> Decode()
 	{
 		if (lz != 0)
 		{
@@ -77,9 +93,9 @@ public class Decoding2F
 		return ProcessHuffman();
 	}
 
-	protected virtual List<ShortIntervalList> ProcessHuffman()
+	protected virtual NList<ShortIntervalList> ProcessHuffman()
 	{
-		List<ShortIntervalList> compressedList;
+		NList<ShortIntervalList> compressedList;
 		if (hf is 2 or 3 or 4)
 		{
 			compressedList = DecodeAdaptive();
@@ -94,8 +110,8 @@ public class Decoding2F
 				throw new DecoderFallbackException();
 			Status[0] = 0;
 			StatusMaximum[0] = frequencyCount;
-			var @base = (uint)ValuesInByte;
-			if (maxFrequency > frequencyCount * 2 || frequencyCount <= ValuesInByte)
+			var @base = (uint)(ValuesInByte + (bwt != 0 ? 1 : 0));
+			if (maxFrequency > @base * 2 || @base <= ValuesInByte + 1)
 			{
 				arithmeticMap.Add((uint)maxFrequency);
 				var prev = (uint)maxFrequency;
@@ -123,16 +139,17 @@ public class Decoding2F
 			{
 				var skippedCount = (int)ar.ReadCount();
 				for (var i = 0; i < skippedCount; i++)
-					skipped.Add((byte)ar.ReadEqual(@base));
+					skipped.Add((byte)ar.ReadEqual(ValuesInByte));
 				counter -= (skippedCount + 9) / 8;
 			}
 		}
 		else
 		{
-			uniqueList.AddRange(RedStarLinq.Fill(ValuesInByte, index => new Interval((uint)index, ValuesInByte)));
-			arithmeticMap.AddRange(RedStarLinq.Fill(ValuesInByte, index => (uint)(index + 1)));
+			var @base = ValuesInByte + (bwt != 0 ? 1 : 0);
+			uniqueList.AddSeries(@base, index => new Interval((uint)index, (uint)@base));
+			arithmeticMap.AddSeries(@base, index => (uint)(index + 1));
 			if (lz != 0)
-				arithmeticMap.Add(GetHuffmanBase(ValuesInByte));
+				arithmeticMap.Add(GetHuffmanBase((uint)@base));
 		}
 		if (counter is < 0 || counter > GetFragmentLength() + GetFragmentLength() / 1000)
 			throw new DecoderFallbackException();
@@ -143,12 +160,16 @@ public class Decoding2F
 		if (bwt != 0)
 		{
 			Current[0] += ProgressBarStep;
-			compressedList = decoding.DecodeBWT(compressedList, skipped);
+			compressedList = decoding.DecodeBWT(compressedList, skipped, bwtBlockSize);
 		}
 		return compressedList;
 	}
 
-	protected virtual List<ShortIntervalList> DecodeAdaptive() => new AdaptiveHuffmanDecGlobal(decoding.CreateGlobalDecoding(), ar, skipped, lzData, lz, bwt, counter).Decode();
+	protected virtual NList<ShortIntervalList> DecodeAdaptive()
+	{
+		using AdaptiveHuffmanDecGlobal dec = new(decoding.CreateGlobalDecoding(), ar, skipped, lzData, lz, bwt, 1, bwtBlockSize, counter);
+		return dec.Decode();
+	}
 
 	protected virtual uint GetHuffmanBase(uint oldBase) => GetBaseWithBuffer(oldBase, false);
 }
