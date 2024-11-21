@@ -11,7 +11,7 @@ public class Decoding2F : IDisposable
 	protected LZData lzData = default!;
 	protected NList<uint> arithmeticMap = default!;
 	protected NList<Interval> uniqueList = default!;
-	protected NList<byte> skipped = default!;
+	protected NList<uint> skipped = default!;
 
 	public Decoding2F(DecodingF decoding, ArithmeticDecoder ar, int hf, int bwt, int lz)
 	{
@@ -39,7 +39,7 @@ public class Decoding2F : IDisposable
 		skipped = [];
 	}
 
-	public void Dispose()
+	public virtual void Dispose()
 	{
 		arithmeticMap?.Dispose();
 		uniqueList?.Dispose();
@@ -160,14 +160,16 @@ public class Decoding2F : IDisposable
 		if (bwt != 0)
 		{
 			Current[0] += ProgressBarStep;
-			compressedList = decoding.DecodeBWT(compressedList, skipped, bwtBlockSize);
+			var skipped2 = skipped.ToNList(x => (byte)x);
+			compressedList = decoding.DecodeBWT(compressedList, skipped2, bwtBlockSize);
+			skipped2.Dispose();
 		}
 		return compressedList;
 	}
 
 	protected virtual NList<ShortIntervalList> DecodeAdaptive()
 	{
-		using AdaptiveHuffmanDecGlobal dec = new(decoding.CreateGlobalDecoding(), ar, skipped, lzData, lz, bwt, 1, bwtBlockSize, counter);
+		using AdaptiveHuffmanDec dec = new(decoding.CreateGlobalDecoding(), ar, skipped, lzData, lz, bwt, 1, bwtBlockSize, counter);
 		return dec.Decode();
 	}
 

@@ -360,7 +360,10 @@ public static class MainClassF
 				bytes.Resize(fragmentLength);
 				rfs.ReadExactly(bytes.AsSpan());
 			}
-			var s = new DecodingF().Decode(bytes, encodingVersion);
+
+			var dec = new DecodingF();
+			var s = dec.Decode(bytes, encodingVersion);
+			dec.Dispose();
 			wfs.Write(s.AsSpan());
 			s.Dispose();
 			Supertotal += ProgressBarStep;
@@ -419,7 +422,9 @@ public static class MainClassF
 				bytes.Resize(fragmentLength);
 				rfs.ReadExactly(bytes.AsSpan());
 			}
-			var s = new ExecutionsF(new DecodingF().Decode(bytes, encodingVersion)).Encode();
+			var dec = new DecodingF();
+			var s = new ExecutionsF(dec.Decode(bytes, encodingVersion)).Encode();
+			dec.Dispose();
 			if (fragmentCount != 1)
 				wfs.Write([(byte)(s.Length >> (BitsPerByte << 1)), unchecked((byte)(s.Length >> BitsPerByte)), unchecked((byte)s.Length)]);
 			wfs.Write(s.AsSpan());

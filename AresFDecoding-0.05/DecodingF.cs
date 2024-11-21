@@ -48,7 +48,7 @@ public class DecodingF : IDisposable
 	protected ArithmeticDecoder ar = default!;
 	protected int misc, hf, rle, lz, bwt, n;
 
-	public void Dispose()
+	public virtual void Dispose()
 	{
 		ar?.Dispose();
 		GC.SuppressFinalize(this);

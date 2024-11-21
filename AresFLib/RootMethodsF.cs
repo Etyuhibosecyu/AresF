@@ -253,7 +253,8 @@ public record class ExecutionsF(NList<byte> OriginalFile)
 	{
 		try
 		{
-			using var decoded = new DecodingF().Decode(compressedFile, ProgramVersion);
+			using var dec = new DecodingF();
+			using var decoded = dec.Decode(compressedFile, ProgramVersion);
 			for (var i = 0; i < OriginalFile.Length; i++)
 				if (OriginalFile[i] != decoded[i])
 					throw new DecoderFallbackException();
