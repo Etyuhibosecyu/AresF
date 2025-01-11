@@ -13,8 +13,8 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 		cstring = originalFile;
 		Methods[tn] += ProgressBarStep;
 		var task = Task.Factory.StartNew(() => string1 = new RLE(cstring, tn).Encode());
-		string2 = new RLE(cstring, tn).RLE3(false);
-		string3 = new RLE(cstring, tn).RLEMixed();
+		string2 = new RLE3(cstring, tn).Encode(false);
+		string3 = new RLEMixed(cstring, tn).Encode();
 		Methods[tn] += ProgressBarStep;
 		task.Wait();
 		Methods[tn] += ProgressBarStep;
