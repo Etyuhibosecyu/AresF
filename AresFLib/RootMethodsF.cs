@@ -7,30 +7,36 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 
 	internal NList<ShortIntervalList> PreEncode(ref int rle, out NList<byte> originalFile2)
 	{
-		NList<byte> string1 = default!, string2, cstring;
-		Subtotal[tn] = 0;
-		SubtotalMaximum[tn] = ProgressBarStep * 11;
+		NList<byte> string1 = default!, string2, string3, cstring;
+		Methods[tn] = 0;
+		MethodsMaximum[tn] = ProgressBarStep * 11;
 		cstring = originalFile;
-		Subtotal[tn] += ProgressBarStep;
+		Methods[tn] += ProgressBarStep;
 		var task = Task.Factory.StartNew(() => string1 = new RLE(cstring, tn).Encode());
 		string2 = new RLE(cstring, tn).RLE3(false);
-		Subtotal[tn] += ProgressBarStep;
+		string3 = new RLE(cstring, tn).RLEMixed();
+		Methods[tn] += ProgressBarStep;
 		task.Wait();
-		Subtotal[tn] += ProgressBarStep;
+		Methods[tn] += ProgressBarStep;
 		Current[tn] = 0;
 		Status[tn] = 0;
-		if (string1.Length < cstring.Length * 0.5 && string1.Length < string2.Length)
+		if (string1.Length < cstring.Length * 0.5 && string1.Length < string2.Length && string1.Length < string3.Length)
 		{
 			rle = 6;
 			cstring = string1;
 		}
-		else if (string2.Length < cstring.Length * 0.5)
+		else if (string2.Length < cstring.Length * 0.5 && string2.Length < string3.Length)
 		{
 			rle = 12;
 			cstring = string2;
 		}
+		else if (string3.Length < cstring.Length * 0.936)
+		{
+			rle = 18;
+			cstring = string3;
+		}
 		originalFile2 = cstring;
-		Subtotal[tn] += ProgressBarStep;
+		Methods[tn] += ProgressBarStep;
 		Current[tn] = 0;
 		Status[tn] = 0;
 		return originalFile2.ToNList(x => ByteIntervals[x]).Insert(0, new ShortIntervalList());
@@ -40,23 +46,23 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 	{
 		NList<byte> s;
 		NList<ShortIntervalList> dl1, cdl = input;
-		Subtotal[tn] = 0;
-		SubtotalMaximum[tn] = ProgressBarStep * 4;
-		Subtotal[tn] += ProgressBarStep;
+		Methods[tn] = 0;
+		MethodsMaximum[tn] = ProgressBarStep * 4;
+		Methods[tn] += ProgressBarStep;
 		dl1 = new(new BWTF(result, tn).Encode(cdl));
-		Subtotal[tn] += ProgressBarStep;
+		Methods[tn] += ProgressBarStep;
 		if ((PresentMethodsF & UsedMethodsF.AHF1) != 0)
 		{
 			s = new AdaptiveHuffman(tn).Encode(dl1, new());
-			Subtotal[tn] += ProgressBarStep;
+			Methods[tn] += ProgressBarStep;
 		}
 		else
 		{
 			dl1 = new Huffman(dl1, new(dl1), tn).Encode();
-			Subtotal[tn] += ProgressBarStep;
+			Methods[tn] += ProgressBarStep;
 			s = WorkUpDoubleList(dl1, tn);
 		}
-		Subtotal[tn] += ProgressBarStep;
+		Methods[tn] += ProgressBarStep;
 		if (s.Length < cs.Length && s.Length > 0)
 		{
 			hf = (PresentMethodsF & UsedMethodsF.AHF1) != 0 ? 4 : 5;
@@ -72,16 +78,16 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 		if ((PresentMethodsF & UsedMethodsF.LZ2) != 0)
 		{
 			dl1 = new LempelZiv(cdl, result, tn).Encode(out lzData);
-			Subtotal[tn] += ProgressBarStep;
+			Methods[tn] += ProgressBarStep;
 			s = WorkUpDoubleList(dl1, tn);
 		}
 		else
 		{
-			Subtotal[tn] += ProgressBarStep;
+			Methods[tn] += ProgressBarStep;
 			dl1 = cdl;
 			s = cs;
 		}
-		Subtotal[tn] += ProgressBarStep;
+		Methods[tn] += ProgressBarStep;
 		if (s.Length < cs.Length && s.Length > 0)
 		{
 			lz = 1;
@@ -90,7 +96,7 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 		}
 		if ((PresentMethodsF & UsedMethodsF.HF2) != 0)
 			s = new AdaptiveHuffman(tn).Encode(cdl, lzData);
-		Subtotal[tn] += ProgressBarStep;
+		Methods[tn] += ProgressBarStep;
 		if (s.Length < cs.Length && s.Length > 0)
 		{
 			hf = 2;
@@ -101,14 +107,14 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 	internal void Encode3(ref NList<byte> cs, ref int indicator)
 	{
 		NList<byte> s;
-		Subtotal[tn] = 0;
-		SubtotalMaximum[tn] = ProgressBarStep * 4;
+		Methods[tn] = 0;
+		MethodsMaximum[tn] = ProgressBarStep * 4;
 		new ArchaicHuffman(tn).Encode(input);
 		s = new LZMA(tn).Encode(input);
-		Subtotal[tn] += ProgressBarStep;
+		Methods[tn] += ProgressBarStep;
 		if (s.Length < originalFile.Length && s.Length > 0)
 		{
-			indicator = 18;
+			indicator = PPMThreshold;
 			cs = s;
 		}
 	}
@@ -116,20 +122,20 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 	internal void Encode4(ref NList<byte> cs, ref int indicator)
 	{
 		NList<byte> s;
-		Subtotal[tn] = 0;
-		SubtotalMaximum[tn] = ProgressBarStep * 2;
-		var ppm = new PPM(tn);
+		Methods[tn] = 0;
+		MethodsMaximum[tn] = ProgressBarStep * 2;
 		var input2 = input.GetRange(1).NSplitIntoEqual(16000000);
-		input2[0].Insert(0, input[0]);
-		if (input2.Length > 1)
+		input2.ForEach(x => x.Insert(0, input[0]));
+		if (input2.Length < 1)
 			throw new EncoderFallbackException();
-		s = ppm.Encode(input);
+		var ppm = new PPM(input2, tn);
+		s = ppm.Encode(true);
 		input2.ForEach(x => x?.Dispose());
 		ppm.Dispose();
-		Subtotal[tn] += ProgressBarStep;
+		Methods[tn] += ProgressBarStep;
 		if (s.Length < originalFile.Length && s.Length > 0)
 		{
-			indicator = 19;
+			indicator = PPMThreshold + 1;
 			cs = s;
 		}
 	}
@@ -143,10 +149,10 @@ public record class ExecutionsF(NList<byte> OriginalFile)
 
 	public NList<byte> Encode()
 	{
-		Total = 0;
-		TotalMaximum = ProgressBarStep * 6;
+		Branches = 0;
+		BranchesMaximum = ProgressBarStep * 6;
 		using var mainInput = new Compression(OriginalFile.ToNList(), [], 0).PreEncode(ref rle, out var originalFile2);
-		Total += ProgressBarStep;
+		Branches += ProgressBarStep;
 		InitThreads(mainInput, originalFile2);
 		ProcessThreads();
 		if ((PresentMethodsF & UsedMethodsF.CS4) != 0 && s[3].Length < cs.Length && s[3].Length > 0 && s.GetSlice(0, 3).All(x => s[3].Length < x.Length))
@@ -193,7 +199,7 @@ public record class ExecutionsF(NList<byte> OriginalFile)
 			catch
 			{
 			}
-			Total += ProgressBarStep;
+			Branches += ProgressBarStep;
 		});
 		Threads[1] = new Thread(() =>
 		{
@@ -205,7 +211,7 @@ public record class ExecutionsF(NList<byte> OriginalFile)
 			catch
 			{
 			}
-			Total += ProgressBarStep;
+			Branches += ProgressBarStep;
 		});
 		Threads[2] = new Thread(() =>
 		{
@@ -217,7 +223,7 @@ public record class ExecutionsF(NList<byte> OriginalFile)
 			catch
 			{
 			}
-			Total += ProgressBarStep;
+			Branches += ProgressBarStep;
 		});
 		Threads[3] = new Thread(() =>
 		{
@@ -229,7 +235,7 @@ public record class ExecutionsF(NList<byte> OriginalFile)
 			catch
 			{
 			}
-			Total += ProgressBarStep;
+			Branches += ProgressBarStep;
 		});
 		for (var i = 0; i < ProgressBarGroups; i++)
 			if (Threads[i] != null && Threads[i].ThreadState is not System.Threading.ThreadState.Unstarted or System.Threading.ThreadState.Running)

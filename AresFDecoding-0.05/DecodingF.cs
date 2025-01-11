@@ -38,7 +38,7 @@ public enum UsedMethodsF
 
 public static class Global
 {
-	public const byte ProgramVersion = 1;
+	public const byte ProgramVersion = 1, PPMThreshold = 24;
 	public static UsedMethodsF PresentMethodsF { get; set; } = UsedMethodsF.CS1 | UsedMethodsF.AHF1;
 }
 
@@ -69,18 +69,32 @@ public class DecodingF : IDisposable
 			return bytes;
 		var byteList = ProcessMisc(compressedFile);
 		Current[0] += ProgressBarStep;
-		if (rle == 12)
-		{
-			var oldByteList = byteList;
-			byteList = new RLEDec(byteList).DecodeRLE3();
-			oldByteList.Dispose();
-		}
 		Current[0] += ProgressBarStep;
-		if (rle == 6)
+		switch (rle)
 		{
-			var oldByteList = byteList;
-			byteList = new RLEDec(byteList).Decode();
-			oldByteList.Dispose();
+			case 0:
+			break;
+			case 1:
+			{
+				var oldByteList = byteList;
+				byteList = new RLEDec(byteList).Decode();
+				oldByteList.Dispose();
+				break;
+			}
+			case 2:
+			{
+				var oldByteList = byteList;
+				byteList = new RLEDec(byteList).DecodeRLE3();
+				oldByteList.Dispose();
+				break;
+			}
+			case 3:
+			{
+				var oldByteList = byteList;
+				byteList = new RLEDec(byteList).DecodeMixed();
+				oldByteList.Dispose();
+				break;
+			}
 		}
 		return byteList;
 	}
@@ -107,10 +121,32 @@ public class DecodingF : IDisposable
 
 	protected virtual NList<byte> ProcessMisc1(NList<byte> compressedFile)
 	{
-		ar = compressedFile[1..];
-		globalDecoding = CreateGlobalDecoding();
-		using var ppm = globalDecoding.CreatePPM(ValuesInByte);
-		return ppm.Decode().PNConvert(x => (byte)x[0].Lower);
+		if (compressedFile.Length <= 5)
+			throw new DecoderFallbackException();
+		var blocksCount = compressedFile[1] + 1;
+		List<NList<byte>> blocks = new(blocksCount);
+		var index = 2;
+		for (var i = 0; i < blocksCount - 1; i++)
+		{
+			if (i != 0 && compressedFile.Length < index + 3)
+				throw new DecoderFallbackException();
+			var blockLength = (compressedFile[index++] << BitsPerByte | compressedFile[index++]) << BitsPerByte | compressedFile[index++];
+			if (compressedFile.Length < index + blockLength)
+				throw new DecoderFallbackException();
+			blocks.Add(compressedFile[index..(index += blockLength)]);
+		}
+		blocks.Add(compressedFile[index..]);
+		Current[0] = 0;
+		CurrentMaximum[0] = ProgressBarStep * (blocksCount + 2);
+		List<NList<byte>> ConvertBlocks(Func<NList<byte>, int, NList<byte>> x) => blocksCount <= ProgressBarGroups ? blocks.PConvert(x) : blocks.ToList(x);
+		return ConvertBlocks((block, index) =>
+		{
+			var globalDecoding = CreateGlobalDecoding(block);
+			using var ppm = globalDecoding.CreatePPM(ValuesInByte, tn: blocksCount <= ProgressBarGroups ? index : 0);
+			var result = ppm.Decode().PNConvert(x => (byte)x[0].Lower);
+			Current[0] += ProgressBarStep;
+			return result;
+		}).ConvertAndJoin(x => x).ToNList();
 	}
 
 	protected virtual NList<byte> ProcessNonMisc(NList<byte> compressedFile)
@@ -130,11 +166,11 @@ public class DecodingF : IDisposable
 
 	protected virtual void SplitMethod(int method)
 	{
-		misc = method >= 18 ? method % 18 % 6 : -1;
-		hf = method % 18 % 6;
-		rle = method % 18 / 6 * 6;
-		lz = Min(method % 18 % 6, 4) % 2;
-		bwt = method % 18 % 6 / 4;
+		misc = method >= PPMThreshold ? method % PPMThreshold % 6 : -1;
+		hf = method % PPMThreshold % 6;
+		rle = method % PPMThreshold / 6;
+		lz = Min(method % PPMThreshold % 6, 4) % 2;
+		bwt = method % PPMThreshold % 6 / 4;
 	}
 
 	public virtual NList<ShortIntervalList> ReadCompressedList(HuffmanData huffmanData, int bwt, LZData lzData, int lz, int counter)
@@ -171,7 +207,7 @@ public class DecodingF : IDisposable
 		return result;
 	}
 
-	public virtual GlobalDecoding CreateGlobalDecoding() => new(ar);
+	public virtual GlobalDecoding CreateGlobalDecoding(ArithmeticDecoder? ar = null) => new(ar ?? this.ar);
 
 	protected virtual Decoding2F CreateDecoding2() => new(this, ar, hf, bwt, lz);
 
