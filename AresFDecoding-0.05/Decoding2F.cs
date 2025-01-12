@@ -20,7 +20,7 @@ public class Decoding2F : IDisposable
 		this.hf = hf;
 		this.bwt = bwt;
 		this.lz = lz;
-		counter = (int)ar.ReadCount() - 1;
+		counter = (int)ar.ReadNumber() - 1;
 		if (bwt != 0)
 		{
 			bwtBlockSize = (int)ar.ReadEqual(18);
@@ -53,7 +53,7 @@ public class Decoding2F : IDisposable
 		{
 			var counter2 = 7;
 			lzRDist = ar.ReadEqual(3);
-			lzMaxDist = ar.ReadCount();
+			lzMaxDist = ar.ReadNumber();
 			if (lzRDist != 0)
 			{
 				lzThresholdDist = ar.ReadEqual(lzMaxDist + 1);
@@ -61,7 +61,7 @@ public class Decoding2F : IDisposable
 			}
 			lzDist = new(lzRDist, lzMaxDist, lzThresholdDist);
 			lzRLength = ar.ReadEqual(3);
-			lzMaxLength = ar.ReadCount(16);
+			lzMaxLength = ar.ReadNumber(16);
 			if (lzRLength != 0)
 			{
 				lzThresholdLength = ar.ReadEqual(lzMaxLength + 1);
@@ -77,7 +77,7 @@ public class Decoding2F : IDisposable
 			if (lzUseSpiralLengths == 1)
 			{
 				lzRSpiralLength = ar.ReadEqual(3);
-				lzMaxSpiralLength = ar.ReadCount(16);
+				lzMaxSpiralLength = ar.ReadNumber(16);
 				counter2 += 3;
 				if (lzRSpiralLength != 0)
 				{
@@ -104,8 +104,8 @@ public class Decoding2F : IDisposable
 		if (hf == 5)
 		{
 			var counter2 = 4;
-			maxFrequency = (int)ar.ReadCount() + 1;
-			frequencyCount = (int)ar.ReadCount() + 1;
+			maxFrequency = (int)ar.ReadNumber() + 1;
+			frequencyCount = (int)ar.ReadNumber() + 1;
 			if (maxFrequency > GetFragmentLength() || frequencyCount > GetFragmentLength())
 				throw new DecoderFallbackException();
 			Status[0] = 0;
@@ -137,7 +137,7 @@ public class Decoding2F : IDisposable
 			counter -= GetArrayLength(counter2, 8);
 			if (bwt != 0)
 			{
-				var skippedCount = (int)ar.ReadCount();
+				var skippedCount = (int)ar.ReadNumber();
 				for (var i = 0; i < skippedCount; i++)
 					skipped.Add((byte)ar.ReadEqual(ValuesInByte));
 				counter -= (skippedCount + 9) / 8;

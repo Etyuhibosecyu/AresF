@@ -5,6 +5,14 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 {
 	private readonly NList<ShortIntervalList> result = [];
 
+	/// <summary>
+	/// Метод предварительного кодирования входного потока. Кодирует <see cref="RLE"/> и преобразует в двойной список
+	/// (см. <a href="https://github.com/Etyuhibosecyu/AresTools">здесь</a>, ниже списка файлов).
+	/// </summary>
+	/// <param name="rle">Индикатор примененного <see cref="RLE"/>. Может принимать разные значения, но в каждый момент времени
+	/// общий индикатор "чем сжато" равен сумме индикаторов методов.</param>
+	/// <param name="originalFile2">Исходный файл, сжатый <see cref="RLE"/>, но не преобразованный в двойной список.</param>
+	/// <returns>Исходный файл, сжатый <see cref="RLE"/> и преобразованный в двойной список.</returns>
 	internal NList<ShortIntervalList> PreEncode(ref int rle, out NList<byte> originalFile2)
 	{
 		NList<byte> string1 = default!, string2, string3, cstring;
@@ -42,14 +50,22 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 		return originalFile2.ToNList(x => ByteIntervals[x]).Insert(0, new ShortIntervalList());
 	}
 
-	internal void Encode1(ref NList<byte> cs, ref int hf)
+	/// <summary>
+	/// Ветка сжатия произвольных файлов с <a href="https://ru.wikipedia.org/wiki/BWT">BWT</a> в "главной роли".
+	/// Также выполняет сжатие статическим или адаптивным Хаффманом
+	/// (см. <a href="https://github.com/Etyuhibosecyu/AresTools">здесь</a>, ниже списка файлов).
+	/// </summary>
+	/// <param name="cs">Локально вЫходной поток.</param>
+	/// <param name="hf">Индикатор примененного Хаффмана. Может принимать разные значения, но в каждый момент времени
+	/// общий индикатор "чем сжато" равен сумме индикаторов методов.</param>
+	internal void BWTEncode(ref NList<byte> cs, ref int hf)
 	{
 		NList<byte> s;
 		NList<ShortIntervalList> dl1, cdl = input;
 		Methods[tn] = 0;
 		MethodsMaximum[tn] = ProgressBarStep * 4;
 		Methods[tn] += ProgressBarStep;
-		dl1 = new(new BWTF(result, tn).Encode(cdl));
+		dl1 = new(new BWTF(cdl, result, tn).Encode());
 		Methods[tn] += ProgressBarStep;
 		if ((PresentMethodsF & UsedMethodsF.AHF1) != 0)
 		{
@@ -70,7 +86,16 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 		}
 	}
 
-	internal void Encode2(ref NList<byte> cs, ref int hf, ref int lz)
+	/// <summary>
+	/// Ветка сжатия произвольных файлов с <a href="https://ru.wikipedia.org/wiki/LZ77">
+	/// Лемпелем-Зивом</a> в "главной роли". Также выполняет сжатие адаптивным Хаффманом
+	/// (см. <a href="https://github.com/Etyuhibosecyu/AresTools">здесь</a>, ниже списка файлов).
+	/// </summary>
+	/// <param name="cs">Локально вЫходной поток.</param>
+	/// <param name="hf">Индикатор примененного Хаффмана. Может принимать разные значения, но в каждый момент времени
+	/// общий индикатор "чем сжато" равен сумме индикаторов методов.</param>
+	/// <param name="lz">Индикатор примененного Лемпеля-Зива.</param>
+	internal void LZEncode(ref NList<byte> cs, ref int hf, ref int lz)
 	{
 		NList<byte> s;
 		NList<ShortIntervalList> dl1, cdl = input;
@@ -104,7 +129,11 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 		}
 	}
 
-	internal void Encode3(ref NList<byte> cs, ref int indicator)
+	/// <summary>
+	/// Ветка сжатия произвольных файлов методом <a href="https://ru.wikipedia.org/wiki/LZMA">LZMA</a>.
+	/// </summary>
+	/// <param name="cs">Локально вЫходной поток.</param>
+	internal void LZMAEncode(ref NList<byte> cs)
 	{
 		NList<byte> s;
 		Methods[tn] = 0;
@@ -113,13 +142,17 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 		s = new LZMA(tn).Encode(input);
 		Methods[tn] += ProgressBarStep;
 		if (s.Length < originalFile.Length && s.Length > 0)
-		{
-			indicator = PPMThreshold;
 			cs = s;
-		}
 	}
 
-	internal void Encode4(ref NList<byte> cs, ref int indicator)
+	/// <summary>
+	/// Ветка сжатия произвольных файлов с
+	/// <a href="https://ru.wikipedia.org/wiki/Алгоритм_сжатия_PPM">PPM</a> в "главной роли".
+	/// Также выполняет разбиение на блоки, каждый из которых обработчик <see cref="PPM"/> может обработать.
+	/// </summary>
+	/// <param name="cs">Локально вЫходной поток.</param>
+	/// <exception cref="EncoderFallbackException"/>
+	internal void PPMEncode(ref NList<byte> cs)
 	{
 		NList<byte> s;
 		Methods[tn] = 0;
@@ -129,24 +162,33 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 		if (input2.Length < 1)
 			throw new EncoderFallbackException();
 		var ppm = new PPM(input2, tn);
-		s = ppm.Encode(true);
+		s = ppm.Encode(false);
 		input2.ForEach(x => x?.Dispose());
 		ppm.Dispose();
 		Methods[tn] += ProgressBarStep;
 		if (s.Length < originalFile.Length && s.Length > 0)
-		{
-			indicator = PPMThreshold + 1;
 			cs = s;
-		}
 	}
 }
 
-public record class ExecutionsF(NList<byte> OriginalFile)
+/// <summary>
+/// Класс кодирования фрагмента произвольного файла (см. <see cref="FragmentLength"/>).<br/>
+/// Использование: <tt>new FragmentEncF(OriginalFile).Encode();</tt>.<br/>
+/// Если вы получили файл в виде массива байт (<tt><see langword="byte"/>[]</tt> или
+/// <tt><see cref="ReadOnlySpan"/>&lt;<see langword="byte"/>&gt;</tt>),
+/// перед передачей в этот метод вызовите <tt>.ToNList()</tt>.
+/// </summary>
+/// <param name="OriginalFile">Исходный файл (в виде нативного списка байт).</param>
+/// <returns>Основной метод возвращает закодированный фрагмент.</returns>
+public record class FragmentEncF(NList<byte> OriginalFile)
 {
 	private readonly NList<byte>[] s = RedStarLinq.FillArray(ProgressBarGroups, _ => OriginalFile);
 	private NList<byte> cs = OriginalFile;
-	private int hf = 0, bwt = 0, rle = 0, lz = 0, misc = 0, hfP1 = 0, hfP2 = 0, lzP2 = 0, miscP3 = 0, miscP4 = 0;
+	private int hf = 0, bwt = 0, rle = 0, lz = 0, misc = 0, hfP1 = 0, hfP2 = 0, lzP2 = 0;
 
+	/// <summary>
+	/// Основной метод класса. Инструкция по применению - см. в описании класса.
+	/// </summary>
 	public NList<byte> Encode()
 	{
 		Branches = 0;
@@ -157,12 +199,12 @@ public record class ExecutionsF(NList<byte> OriginalFile)
 		ProcessThreads();
 		if ((PresentMethodsF & UsedMethodsF.CS4) != 0 && s[3].Length < cs.Length && s[3].Length > 0 && s.GetSlice(0, 3).All(x => s[3].Length < x.Length))
 		{
-			misc = miscP4;
+			misc = PPMThreshold + 1;
 			cs = s[3];
 		}
 		else if ((PresentMethodsF & UsedMethodsF.CS3) != 0 && s[2].Length < cs.Length && s[2].Length > 0 && s[2].Length < s[1].Length && s[2].Length < s[0].Length)
 		{
-			misc = miscP3;
+			misc = PPMThreshold;
 			cs = s[2];
 		}
 		else if ((PresentMethodsF & UsedMethodsF.CS2) != 0 && s[1].Length < cs.Length && s[1].Length > 0 && s[1].Length < s[0].Length)
@@ -194,7 +236,7 @@ public record class ExecutionsF(NList<byte> OriginalFile)
 			try
 			{
 				if ((PresentMethodsF & UsedMethodsF.CS1) != 0)
-					new Compression(originalFile2, mainInput, 0).Encode1(ref s[0], ref hfP1);
+					new Compression(originalFile2, mainInput, 0).BWTEncode(ref s[0], ref hfP1);
 			}
 			catch
 			{
@@ -206,7 +248,7 @@ public record class ExecutionsF(NList<byte> OriginalFile)
 			try
 			{
 				if ((PresentMethodsF & UsedMethodsF.CS2) != 0)
-					new Compression(originalFile2, mainInput, 1).Encode2(ref s[1], ref hfP2, ref lzP2);
+					new Compression(originalFile2, mainInput, 1).LZEncode(ref s[1], ref hfP2, ref lzP2);
 			}
 			catch
 			{
@@ -218,7 +260,7 @@ public record class ExecutionsF(NList<byte> OriginalFile)
 			try
 			{
 				if ((PresentMethodsF & UsedMethodsF.CS3) != 0)
-					new Compression(originalFile2, mainInput, 2).Encode3(ref s[2], ref miscP3);
+					new Compression(originalFile2, mainInput, 2).LZMAEncode(ref s[2]);
 			}
 			catch
 			{
@@ -230,7 +272,7 @@ public record class ExecutionsF(NList<byte> OriginalFile)
 			try
 			{
 				if ((PresentMethodsF & UsedMethodsF.CS4) != 0)
-					new Compression(originalFile2, mainInput, 3).Encode4(ref s[3], ref miscP4);
+					new Compression(originalFile2, mainInput, 3).PPMEncode(ref s[3]);
 			}
 			catch
 			{

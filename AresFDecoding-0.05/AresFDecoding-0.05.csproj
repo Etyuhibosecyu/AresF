@@ -6,7 +6,6 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\..\AresGlobal\AresGlobalDecoding-0.075\AresGlobalDecoding-0.075.csproj" />
+		<ProjectReference Include="..\..\AresGlobal\AresGlobalDecoding\AresGlobalDecoding.csproj" />
 	</ItemGroup>
-
 </Project>

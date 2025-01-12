@@ -286,7 +286,7 @@ public static class MainClassF
 					bytes.Resize(leftLength);
 			}
 			rfs.ReadExactly(bytes.AsSpan());
-			var s = new ExecutionsF(bytes).Encode();
+			var s = new FragmentEncF(bytes).Encode();
 			if (fragmentCount != 1)
 			{
 				wfs.Write(s.Length < 16000000 ? [(byte)(s.Length >> (BitsPerByte << 1)),
@@ -427,7 +427,7 @@ public static class MainClassF
 				rfs.ReadExactly(bytes.AsSpan());
 			}
 			var dec = new DecodingF();
-			var s = new ExecutionsF(dec.Decode(bytes, encodingVersion)).Encode();
+			var s = new FragmentEncF(dec.Decode(bytes, encodingVersion)).Encode();
 			dec.Dispose();
 			if (fragmentCount != 1)
 				wfs.Write([(byte)(s.Length >> (BitsPerByte << 1)), unchecked((byte)(s.Length >> BitsPerByte)), unchecked((byte)s.Length)]);

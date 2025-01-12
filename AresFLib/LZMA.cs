@@ -31,20 +31,20 @@ internal record class LZMA(int TN)
 		var (blockStartValue, blockEscapeValue, bitsCount, blockStartIndexes) = LZMABlockStart(bitList);
 		var blockStart = new BitList(bitsCount, blockStartValue).ToNList(x => new ShortIntervalList() { new(x ? 1u : 0, 2) });
 		var repeatsInfoSum = repeatsInfo.JoinIntoSingle().ToNList();
-		LZRequisites(bitList.Length, BitsPerByte, repeatsInfoSum, out var boundIndex, out var repeatsInfoList2, out var stats, out var maxDist, out var maxLength, out var maxSpiralLength, out var rDist, out var thresholdDist, out var rLength, out var thresholdLength, out var rSpiralLength, out var thresholdSpiralLength);
+		LZRequisites(bitList.Length, BitsPerByte, repeatsInfoSum, useSpiralLengths, out var boundIndex, out var repeatsInfoList2, out var stats, out var lzData);
 		var result = bitList.ToNList(x => new ShortIntervalList() { new(x ? 1u : 0, 2) });
 		Status[TN] = 0;
 		StatusMaximum[TN] = stats.starts.Length;
 		Current[TN] += ProgressBarStep;
 		BitList elementsReplaced = new(result.Length, false);
-		WriteLZMatches(result, blockStart, useSpiralLengths, stats.starts[..boundIndex], stats.dists, stats.lengths, stats.spiralLengths, maxDist, maxLength, maxSpiralLength, rDist, thresholdDist, rLength, thresholdLength, rSpiralLength, thresholdSpiralLength, elementsReplaced);
+		WriteLZMatches(result, blockStart, stats.starts[..boundIndex], stats.dists, stats.lengths, stats.spiralLengths, lzData, elementsReplaced);
 		var sortedRepeatsInfo2 = repeatsInfoList2.PConvert(l => l.PNBreak(x => x.Key, x => (x.Value.dist, x.Value.length, x.Value.spiralLength)));
 		repeatsInfoList2.ForEach(x => x.Dispose());
 		repeatsInfoList2.Dispose();
 		var brokenRepeatsInfo = sortedRepeatsInfo2.PConvert(l => (l.Item1, l.Item2.PNBreak()));
 		sortedRepeatsInfo2.ForEach(x => x.Item2.Dispose());
 		sortedRepeatsInfo2.Dispose();
-		Parallel.ForEach(brokenRepeatsInfo, x => WriteLZMatches(result, blockStart, useSpiralLengths, x.Item1, x.Item2.Item1, x.Item2.Item2, x.Item2.Item3, maxDist, maxLength, maxSpiralLength, rDist, thresholdDist, rLength, thresholdLength, rSpiralLength, thresholdSpiralLength, elementsReplaced, false));
+		Parallel.ForEach(brokenRepeatsInfo, x => WriteLZMatches(result, blockStart, x.Item1, x.Item2.Item1, x.Item2.Item2, x.Item2.Item3, lzData, elementsReplaced, false));
 		if (blockStartIndexes.Length != 0)
 		{
 			var temp = result.GetRange(0, blockStartIndexes[0]);
@@ -71,23 +71,23 @@ internal record class LZMA(int TN)
 		}
 		result.FilterInPlace((x, index) => index == 0 || !elementsReplaced[index]);
 		elementsReplaced.Dispose();
-		NList<Interval> c = [new Interval((uint)rDist, 3)];
-		c.WriteCount(maxDist, 24);
-		if (rDist != 0)
-			c.Add(new(thresholdDist, maxDist + 1));
-		c.Add(new Interval((uint)rLength, 3));
-		c.WriteCount(maxLength, 24);
-		if (rLength != 0)
-			c.Add(new(thresholdLength, maxLength + 1u));
-		if (maxDist == 0 && maxLength == 0)
+		NList<Interval> c = [new Interval(lzData.Dist.R, 3)];
+		c.WriteNumber(lzData.Dist.Max, 24);
+		if (lzData.Dist.R != 0)
+			c.Add(new(lzData.Dist.Threshold, lzData.Dist.Max + 1));
+		c.Add(new Interval(lzData.Length.R, 3));
+		c.WriteNumber(lzData.Length.Max, 24);
+		if (lzData.Length.R != 0)
+			c.Add(new(lzData.Length.Threshold, lzData.Length.Max + 1u));
+		if (lzData.Dist.Max == 0 && lzData.Length.Max == 0)
 			c.Add(new(1, 2));
 		c.Add(new Interval(useSpiralLengths, 2));
 		if (useSpiralLengths == 1)
 		{
-			c.Add(new Interval((uint)rSpiralLength, 3));
-			c.WriteCount(maxSpiralLength, 16);
-			if (rSpiralLength != 0)
-				c.Add(new(thresholdSpiralLength, maxSpiralLength + 1u));
+			c.Add(new Interval(lzData.SpiralLength.R, 3));
+			c.WriteNumber(lzData.SpiralLength.Max, 16);
+			if (lzData.SpiralLength.R != 0)
+				c.Add(new(lzData.SpiralLength.Threshold, lzData.SpiralLength.Max + 1u));
 		}
 		var cSplit = c.SplitIntoEqual(8).Convert(x => new ShortIntervalList(x));
 		c.Dispose();
@@ -162,7 +162,7 @@ internal record class LZMA(int TN)
 		return ((uint)CreateVar(groups.FindMin(x => x.Length)!.Key, out var value), (uint)groups.FilterInPlace(x => x.Key != value).FindMin(x => x.Length)!.Key, BitsPerByte, ranges.IndexesOf(value));
 	}
 
-	private void WriteLZMatches(NList<ShortIntervalList> result, NList<ShortIntervalList> blockStart, uint useSpiralLengths, NList<uint> starts, NList<uint> dists, NList<uint> lengths, NList<uint> spiralLengths, uint maxDist, uint maxLength, uint maxSpiralLength, int rDist, uint thresholdDist, int rLength, uint thresholdLength, int rSpiralLength, uint thresholdSpiralLength, BitList elementsReplaced, bool changeBase = true)
+	private void WriteLZMatches(NList<ShortIntervalList> result, NList<ShortIntervalList> blockStart, NList<uint> starts, NList<uint> dists, NList<uint> lengths, NList<uint> spiralLengths, LZData lzData, BitList elementsReplaced, bool changeBase = true)
 	{
 		double statesNumLog1, statesNumLog2;
 		for (var i = 0; i < starts.Length; i++, Status[TN]++)
@@ -174,37 +174,37 @@ internal record class LZMA(int TN)
 				continue;
 			statesNumLog1 = Log(2) * (localMaxLength + 2);
 			statesNumLog2 = Log(2) * blockStart.Length;
-			statesNumLog2 += StatesNumLogSum(iDist, rDist, maxDist, thresholdDist, useSpiralLengths);
-			statesNumLog2 += StatesNumLogSum(iLength, rLength, maxLength, thresholdLength);
-			if (useSpiralLengths == 1 && iLength < localMaxLength)
-				statesNumLog2 += StatesNumLogSum(iSpiralLength, rSpiralLength, maxSpiralLength, thresholdSpiralLength);
+			statesNumLog2 += StatesNumLogSum(iDist, lzData.Dist, lzData.UseSpiralLengths);
+			statesNumLog2 += StatesNumLogSum(iLength, lzData.Length);
+			if (lzData.UseSpiralLengths == 1 && iLength < localMaxLength)
+				statesNumLog2 += StatesNumLogSum(iSpiralLength, lzData.SpiralLength);
 			if (statesNumLog1 <= statesNumLog2)
 				continue;
 			var b = blockStart.Copy();
 			b[^1] = new(b[^1]);
-			WriteLZValue(b[^1], iLength, rLength, maxLength, thresholdLength);
-			var maxDist2 = Min(maxDist, (uint)(iStart - iLength - 2));
-			if (useSpiralLengths == 0)
-				WriteLZValue(b[^1], iDist, rDist, maxDist2, thresholdDist);
+			WriteLZValue(b[^1], iLength, lzData.Length);
+			var maxDist2 = Min(lzData.Dist.Max, (uint)(iStart - iLength - 2));
+			if (lzData.UseSpiralLengths == 0)
+				WriteLZValue(b[^1], iDist, new(lzData.Dist.R, maxDist2, lzData.Dist.Threshold));
 			else if (iLength >= localMaxLength)
-				WriteLZValue(b[^1], iDist, rDist, maxDist2, thresholdDist, 1);
+				WriteLZValue(b[^1], iDist, new(lzData.Dist.R, maxDist2, lzData.Dist.Threshold), 1);
 			else
 			{
-				if (rDist == 0 || maxDist2 < thresholdDist)
+				if (lzData.Dist.R == 0 || maxDist2 < lzData.Dist.Threshold)
 					b[^1].Add(new(maxDist2 + 1, maxDist2 + 2));
-				else if (rDist == 1)
+				else if (lzData.Dist.R == 1)
 				{
-					b[^1].Add(new(thresholdDist + 1, thresholdDist + 2));
-					b[^1].Add(new(maxDist2 - thresholdDist, maxDist2 - thresholdDist + 1));
+					b[^1].Add(new(lzData.Dist.Threshold + 1, lzData.Dist.Threshold + 2));
+					b[^1].Add(new(maxDist2 - lzData.Dist.Threshold, maxDist2 - lzData.Dist.Threshold + 1));
 				}
 				else
 				{
-					b[^1].Add(new(maxDist2 - thresholdDist + 1, maxDist2 - thresholdDist + 2));
-					b[^1].Add(new(thresholdDist, thresholdDist + 1));
+					b[^1].Add(new(maxDist2 - lzData.Dist.Threshold + 1, maxDist2 - lzData.Dist.Threshold + 2));
+					b[^1].Add(new(lzData.Dist.Threshold, lzData.Dist.Threshold + 1));
 				}
 			}
-			if (useSpiralLengths == 1 && iLength < localMaxLength)
-				WriteLZValue(b[^1], iSpiralLength, rSpiralLength, maxSpiralLength, thresholdSpiralLength);
+			if (lzData.UseSpiralLengths == 1 && iLength < localMaxLength)
+				WriteLZValue(b[^1], iSpiralLength, lzData.SpiralLength);
 			result.SetRange(iStart, b);
 			elementsReplaced.SetAll(true, iStart + b.Length, (int)localMaxLength + 2 - b.Length);
 		}
