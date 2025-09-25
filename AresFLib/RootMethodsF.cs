@@ -1,5 +1,4 @@
-﻿
-namespace AresFLib;
+﻿namespace AresFLib;
 
 internal partial class Compression(NList<byte> originalFile, NList<ShortIntervalList> input, int tn)
 {
@@ -102,7 +101,7 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 		LZData lzData = new();
 		if ((PresentMethodsF & UsedMethodsF.LZ2) != 0)
 		{
-			dl1 = new LempelZiv(cdl, result, tn).Encode(out lzData);
+			dl1 = new LempelZiv(cdl, result, tn).Encode();
 			Methods[tn] += ProgressBarStep;
 			s = WorkUpDoubleList(dl1, tn);
 		}
@@ -157,7 +156,7 @@ internal partial class Compression(NList<byte> originalFile, NList<ShortInterval
 		NList<byte> s;
 		Methods[tn] = 0;
 		MethodsMaximum[tn] = ProgressBarStep * 2;
-		var input2 = input.GetRange(1).NSplitIntoEqual(16000000);
+		var input2 = input.GetRange(1).NSplitIntoEqual(16000000).PToArray();
 		input2.ForEach(x => x.Insert(0, input[0]));
 		if (input2.Length < 1)
 			throw new EncoderFallbackException();

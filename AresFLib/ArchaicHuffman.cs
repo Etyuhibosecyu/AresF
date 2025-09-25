@@ -1,5 +1,4 @@
-﻿
-namespace AresFLib;
+﻿namespace AresFLib;
 
 internal record class ArchaicHuffman(int TN)
 {
@@ -35,7 +34,7 @@ internal record class ArchaicHuffman(int TN)
 		while (nodes.Length > 1)
 		{
 			ArchaicHuffmanNode node = new(nodes[^1], nodes[^2]);
-			nodes.Remove(^2);
+			nodes.RemoveEnd(^2);
 			var pos = nodes.BinarySearch(node, comparer);
 			if (pos < 0)
 				pos = ~pos;

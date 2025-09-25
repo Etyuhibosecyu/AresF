@@ -1,19 +1,17 @@
 ﻿global using AresGlobalMethods;
-global using Corlib.NStar;
+global using NStar.Core;
+global using NStar.ExtraHS;
+global using NStar.Linq;
 global using System;
-global using System.Runtime.InteropServices;
 global using System.Text;
-global using System.Threading;
-global using System.Threading.Tasks;
 global using UnsafeFunctions;
 global using G = System.Collections.Generic;
 global using static AresFLib.Global;
 global using static AresGlobalMethods.DecodingExtents;
-global using static Corlib.NStar.Extents;
+global using static NStar.Core.Extents;
 global using static System.Math;
 global using static UnsafeFunctions.Global;
-global using String = Corlib.NStar.String;
-using System.Text.RegularExpressions;
+global using String = NStar.Core.String;
 using Mpir.NET;
 
 namespace AresFLib;
@@ -224,7 +222,7 @@ public class DecodingF : IDisposable
 			bytes2.AddRange(numericInput.GetSlice(i..(i += bwtBlockExtraSize)).Convert(x => (byte)x));
 			bytes2.AddRange(zle != 0 ? DecodeZLE(numericInput, ref i, bwtBlockSize) : numericInput.GetRange(i..Min(i += bwtBlockSize, numericInput.Length)).Convert(x => (byte)x));
 		}
-		var hs = bytes2.Filter((x, index) => index % (bwtBlockSize + bwtBlockExtraSize) >= bwtBlockExtraSize).ToHashSet().Concat(skipped).Sort().ToHashSet();
+		var hs = bytes2.Filter((x, index) => index % (bwtBlockSize + bwtBlockExtraSize) >= bwtBlockExtraSize).ToNHashSet().Concat(skipped).Sort().ToNHashSet();
 		NList<byte> result = new(bytes2.Length);
 		for (var i = 0; i < bytes2.Length; i += bwtBlockSize, Status[0]++)
 		{
@@ -240,14 +238,14 @@ public class DecodingF : IDisposable
 		return result.ToNList(x => ByteIntervals[x]);
 	}
 
-	protected virtual NList<byte> DecodeBWT2(NList<byte> input, ListHashSet<byte> hs, int firstPermutation)
+	protected virtual NList<byte> DecodeBWT2(NList<byte> input, NListHashSet<byte> hs, int firstPermutation)
 	{
 		var mtfMemory = hs.ToNList();
 		for (var i = 0; i < input.Length; i++)
 		{
 			var index = hs.IndexOf(input[i]);
 			input[i] = mtfMemory[index];
-			mtfMemory.SetRange(1, mtfMemory[..index]);
+			mtfMemory.CopyRangeTo(0, mtfMemory, 1, index);
 			mtfMemory[0] = input[i];
 		}
 		mtfMemory.Dispose();
@@ -279,15 +277,14 @@ public class DecodingF : IDisposable
 				result.Add((byte)byteList[i++]);
 			if (i >= byteList.Length || result.Length >= bwtBlockSize)
 				break;
-			zeroCode.Remove(1);
+			zeroCode.RemoveEnd(1);
 			length = 0;
 			while (i < byteList.Length && result.Length + length < bwtBlockSize && (byteList[i] == zero || byteList[i] == zeroB))
 			{
 				zeroCode.Add(byteList[i++] == zero ? '0' : '1');
-				length = (int)(new MpzT(zeroCode.ToString(), 2) - 1);
+				length = Convert.ToInt32(zeroCode.ToString(), 2) - 1;
 			}
-			using var streamOfZeros = RedStarLinq.NFill((byte)zero, length);
-			result.AddRange(streamOfZeros);
+			result.AddSeries((byte)zero, length);
 		}
 		return result;
 	}

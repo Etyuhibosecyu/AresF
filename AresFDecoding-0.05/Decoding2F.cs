@@ -1,5 +1,4 @@
-﻿
-namespace AresFLib;
+﻿namespace AresFLib;
 
 public class Decoding2F : IDisposable
 {

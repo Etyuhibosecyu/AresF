@@ -1,5 +1,4 @@
-﻿
-namespace AresFLib;
+﻿namespace AresFLib;
 internal record class LZMA(int TN)
 {
 	private readonly int threadsCount = Environment.ProcessorCount;
@@ -16,7 +15,7 @@ internal record class LZMA(int TN)
 	{
 		Current[TN] = 0;
 		CurrentMaximum[TN] = ProgressBarStep * 2;
-		var indexCodes = RedStarLinq.PNFill(bitList.Length - 23, index => bitList.GetSmallRange(index, 24)).PGroup(TN).Filter(X => X.Group.Length >= 2).NSort(x => x.Key).PToArray(col => col.Group.Sort());
+		var indexCodes = RedStarLinqExtras.PNFill(bitList.Length - 23, index => bitList.GetSmallRange(index, 24)).PGroup(TN).Filter(X => X.Group.Length >= 2).NSort(x => x.Key).PToArray(col => col.Group.Sort());
 		var startKGlobal = 24;
 		var repeatsInfo = RedStarLinq.FillArray(threadsCount, _ => new Dictionary<uint, (uint dist, uint length, uint spiralLength)>());
 		Status[TN] = 0;
@@ -152,14 +151,14 @@ internal record class LZMA(int TN)
 		using NList<int> ranges = [];
 		for (var i = 2; i <= BitsPerByte; i++)
 		{
-			ranges.Replace(RedStarLinq.PNFill(bitList.Length - (i - 1), index => (int)bitList.GetSmallRange(index, i)));
+			ranges.Replace(RedStarLinqExtras.PNFill(bitList.Length - (i - 1), index => (int)bitList.GetSmallRange(index, i)));
 			using var hs = new Chain(i).ToHashSet();
 			hs.ExceptWith(ranges);
 			if (hs.Length != 0)
 				return ((uint)hs[0], uint.MaxValue, i, []);
 		}
-		using var groups = ranges.Group();
-		return ((uint)CreateVar(groups.FindMin(x => x.Length)!.Key, out var value), (uint)groups.FilterInPlace(x => x.Key != value).FindMin(x => x.Length)!.Key, BitsPerByte, ranges.IndexesOf(value));
+		using var groups = ranges.FrequencyTable();
+		return ((uint)CreateVar(groups.FindMin(x => x.Count)!.Key, out var value), (uint)groups.FilterInPlace(x => x.Key != value).FindMin(x => x.Count)!.Key, BitsPerByte, ranges.IndexesOf(value));
 	}
 
 	private void WriteLZMatches(NList<ShortIntervalList> result, NList<ShortIntervalList> blockStart, NList<uint> starts, NList<uint> dists, NList<uint> lengths, NList<uint> spiralLengths, LZData lzData, BitList elementsReplaced, bool changeBase = true)

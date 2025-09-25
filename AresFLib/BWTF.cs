@@ -1,4 +1,5 @@
 ﻿using Mpir.NET;
+using NStar.ExtraHS;
 
 namespace AresFLib;
 
@@ -17,7 +18,7 @@ namespace AresFLib;
 internal record class BWTF(NList<ShortIntervalList> Input, NList<ShortIntervalList> Result, int TN)
 {
 	private NList<byte> byteInput = default!, uniqueElems2 = default!, byteResult = default!;
-	private NList<byte>[] buffer = default!, currentBlock = default!, mtfMemory = default!;
+	private NList<byte>[] blocks = default!, buffers = default!, mtfMemory = default!;
 	private NList<int>[] indexes = default!;
 	private bool multiThreadedCompare;
 
@@ -45,7 +46,7 @@ internal record class BWTF(NList<ShortIntervalList> Input, NList<ShortIntervalLi
 		BitList bitInput = new(byteInput.Length);
 		using BitList bitInputBetweenZLE = new(BWTBlockExtraSize, false);
 		Status[TN]++;
-		var uniqueElems = byteInput.ToHashSet();
+		var uniqueElems = byteInput.ToNHashSet();
 		Status[TN]++;
 		uniqueElems2 = uniqueElems.ToNList().Sort();
 		Status[TN]++;
@@ -66,7 +67,7 @@ internal record class BWTF(NList<ShortIntervalList> Input, NList<ShortIntervalLi
 			byteInput.AddRange(zle);
 			bitInput.AddRange(bitInputBetweenZLE).AddRange(zerosB);
 		}
-		uniqueElems2 = byteResult.Filter((x, index) => index % (BWTBlockSize + BWTBlockExtraSize) >= BWTBlockExtraSize).ToHashSet().ToNList().Sort();
+		uniqueElems2 = byteResult.Filter((x, index) => index % (BWTBlockSize + BWTBlockExtraSize) >= BWTBlockExtraSize).ToNHashSet().ToNList().Sort();
 		byteResult.Dispose();
 		Result.AddRange(byteInput.Combine(bitInput, (x, y) => y ? ByteIntervalsPlus1[ValuesInByte] : ByteIntervalsPlus1[x]));
 		Result[0].Add(BWTApplied);
@@ -99,43 +100,43 @@ internal record class BWTF(NList<ShortIntervalList> Input, NList<ShortIntervalLi
 
 	private void ExecuteMainProcess()
 	{
-		buffer = RedStarLinq.FillArray(Environment.ProcessorCount, index => byteInput.Length < BWTBlockSize * (index + 1) ? default! : RedStarLinq.NEmptyList<byte>(BWTBlockSize * 2 - 1));
-		currentBlock = RedStarLinq.FillArray(buffer.Length, index => byteInput.Length < BWTBlockSize * (index + 1) ? default! : RedStarLinq.NEmptyList<byte>(BWTBlockSize));
-		indexes = RedStarLinq.FillArray(buffer.Length, index => byteInput.Length < BWTBlockSize * (index + 1) ? default! : RedStarLinq.NEmptyList<int>(BWTBlockSize));
-		var tasks = new Task[buffer.Length];
-		mtfMemory = RedStarLinq.FillArray<NList<byte>>(buffer.Length, _ => default!);
-		multiThreadedCompare = buffer[buffer.Length * 3 / 4] == null;
+		buffers = RedStarLinq.FillArray(Environment.ProcessorCount, index => byteInput.Length < BWTBlockSize * (index + 1) ? default! : RedStarLinq.NEmptyList<byte>(BWTBlockSize * 2 - 1));
+		blocks = RedStarLinq.FillArray(buffers.Length, index => byteInput.Length < BWTBlockSize * (index + 1) ? default! : RedStarLinq.NEmptyList<byte>(BWTBlockSize));
+		indexes = RedStarLinq.FillArray(buffers.Length, index => byteInput.Length < BWTBlockSize * (index + 1) ? default! : RedStarLinq.NEmptyList<int>(BWTBlockSize));
+		var tasks = new Task[buffers.Length];
+		mtfMemory = RedStarLinq.FillArray<NList<byte>>(buffers.Length, _ => default!);
+		multiThreadedCompare = buffers[buffers.Length * 3 / 4] == null;
 		for (var i = 0; i < GetArrayLength(byteInput.Length, BWTBlockSize); i++)
 		{
-			tasks[i % buffer.Length]?.Wait();
+			tasks[i % buffers.Length]?.Wait();
 			int i2 = i * BWTBlockSize, leftLength = byteInput.Length - i2, length = Min(BWTBlockSize, leftLength);
-			mtfMemory[i % buffer.Length] = uniqueElems2.Copy();
+			mtfMemory[i % buffers.Length] = uniqueElems2.Copy();
 			if (leftLength < BWTBlockSize)
 			{
-				buffer[i % buffer.Length]?.Resize(leftLength * 2 - 1);
-				currentBlock[i % buffer.Length]?.Resize(leftLength);
-				indexes[i % buffer.Length]?.Resize(leftLength);
-				buffer[i % buffer.Length] ??= RedStarLinq.NEmptyList<byte>(leftLength * 2 - 1);
-				currentBlock[i % buffer.Length] ??= RedStarLinq.NEmptyList<byte>(leftLength);
-				indexes[i % buffer.Length] ??= RedStarLinq.NEmptyList<int>(leftLength);
+				buffers[i % buffers.Length]?.Resize(leftLength * 2 - 1);
+				blocks[i % buffers.Length]?.Resize(leftLength);
+				indexes[i % buffers.Length]?.Resize(leftLength);
+				buffers[i % buffers.Length] ??= RedStarLinq.NEmptyList<byte>(leftLength * 2 - 1);
+				blocks[i % buffers.Length] ??= RedStarLinq.NEmptyList<byte>(leftLength);
+				indexes[i % buffers.Length] ??= RedStarLinq.NEmptyList<int>(leftLength);
 			}
 			for (var j = 0; j < length; j++)
-				currentBlock[i % buffer.Length][j] = byteInput[i2 + j];
+				blocks[i % buffers.Length][j] = byteInput[i2 + j];
 			var i3 = i;
-			tasks[i % buffer.Length] = Task.Factory.StartNew(() => BWTMain(i3));
+			tasks[i % buffers.Length] = Task.Factory.StartNew(() => BWTMain(i3));
 		}
 		tasks.ForEach(x => x?.Wait());
-		buffer.ForEach(x => x?.Dispose());
-		currentBlock.ForEach(x => x?.Dispose());
+		buffers.ForEach(x => x?.Dispose());
+		blocks.ForEach(x => x?.Dispose());
 		indexes.ForEach(x => x?.Dispose());
 		mtfMemory.ForEach(x => x?.Dispose());
 	}
 
 	private void BWTMain(int blockIndex)
 	{
-		var firstPermutation = 0;
 		//Сортировка контекстов с обнаружением, в какое место попал первый
-		GetBWT(currentBlock[blockIndex % buffer.Length]!, buffer[blockIndex % buffer.Length]!, indexes[blockIndex % buffer.Length], currentBlock[blockIndex % buffer.Length]!, ref firstPermutation);
+		var arrayIndex = blockIndex % buffers.Length;
+		GetBWT(blocks[arrayIndex], buffers[arrayIndex], indexes[arrayIndex], blocks[arrayIndex], out var firstPermutation);
 		for (var i = BWTBlockExtraSize - 1; i >= 0; i--)
 		{
 			byteResult[(BWTBlockSize + BWTBlockExtraSize) * blockIndex + i] = unchecked((byte)firstPermutation);
@@ -144,11 +145,13 @@ internal record class BWTF(NList<ShortIntervalList> Input, NList<ShortIntervalLi
 		WriteToMTF(blockIndex);
 	}
 
-	/// <summary>Основной метод, выполняющий группировку (см. BWTGroup) и сортировку в BWT.</summary>
+	/// <summary>
+	/// Основной метод, выполняющий группировку (см. <see cref="UnsafeFunctions.Global.BWTGroup"/>) и сортировку в BWT.
+	/// </summary>
 	/// <param name="source">Исходный список байт.</param>
-	/// <param name="buffer">Буфер для преобразования. Представляет собой исходный список байт, к которому
-	/// добавлен он же без последнего элемента (формируется непосредственно в начале этого метода, в качестве параметра
-	/// нужно передать лишь <see cref="NList"/>&lt;<see langword="byte"/>&gt; соответствующей длины), что позволяет получить все
+	/// <param name="buffer">Буфер для преобразования. Представляет собой исходный список байт, к которому добавлен он же
+	/// без последнего элемента (формируется непосредственно в начале этого метода, в качестве параметра нужно передать
+	/// лишь <see cref="NList{T}">NList</see>&lt;<see langword="byte"/>&gt; соответствующей длины), что позволяет получить все
 	/// циклические перестановки исходного списка без построения квадратной матрицы, что позволяет иметь огромные размеры блока
 	/// без невообразимых требований к памяти (иначе для сжатия блока размером <i>n</i> байт требовалось бы
 	/// <i>n</i> * <i>n</i> байт памяти). Не сортируется, сортируются индексы (см. <paramref name="indexes"/>).</param>
@@ -156,13 +159,13 @@ internal record class BWTF(NList<ShortIntervalList> Input, NList<ShortIntervalLi
 	/// (см. <paramref name="buffer"/>). Заполняются в начале метода, параметр требует лишь список нужной длины.</param>
 	/// <param name="result">Результат преобразования.</param>
 	/// <param name="firstPermutation">Первая перестановка (см. <see cref="BWTBlockExtraSize"/>).</param>
-	private void GetBWT(NList<byte> source, NList<byte> buffer, NList<int> indexes, NList<byte> result, ref int firstPermutation)
+	private void GetBWT(NList<byte> source, NList<byte> buffer, NList<int> indexes, NList<byte> result, out int firstPermutation)
 	{
 		buffer.SetRange(0, source);
 		buffer.SetRange(source.Length, source[..^1]);
 		for (var i = 0; i < indexes.Length; i++)
 			indexes[i] = i;
-		var indexesToSort = buffer.BWTGroup(source.Length, multiThreadedCompare ? TN : -1);
+		var indexesToSort = buffer.BWTGroup(multiThreadedCompare ? TN : -1);
 		foreach (var index in indexesToSort)
 		{
 			indexes.Sort(x => buffer[index + x]);
@@ -181,13 +184,15 @@ internal record class BWTF(NList<ShortIntervalList> Input, NList<ShortIntervalLi
 
 	private void WriteToMTF(int blockIndex)
 	{
-		for (var i = 0; i < currentBlock[blockIndex % buffer.Length].Length; i++)
+		byte elem;
+		int index;
+		for (var i = 0; i < blocks[blockIndex % buffers.Length].Length; i++)
 		{
-			var elem = currentBlock[blockIndex % buffer.Length][i];
-			var index = mtfMemory[blockIndex % buffer.Length].IndexOf(elem);
+			elem = blocks[blockIndex % buffers.Length][i];
+			index = mtfMemory[blockIndex % buffers.Length].IndexOf(elem);
 			byteResult[(BWTBlockSize + BWTBlockExtraSize) * blockIndex + i + BWTBlockExtraSize] = uniqueElems2[index];
-			mtfMemory[blockIndex % buffer.Length].SetRange(1, mtfMemory[blockIndex % buffer.Length][..index]);
-			mtfMemory[blockIndex % buffer.Length][0] = elem;
+			mtfMemory[blockIndex % buffers.Length].SetRange(1, mtfMemory[blockIndex % buffers.Length].GetRange(..index));
+			mtfMemory[blockIndex % buffers.Length][0] = elem;
 		}
 	}
 
